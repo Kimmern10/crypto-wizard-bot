@@ -1,29 +1,12 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from 'sonner';
-import { WebSocketManager, getKrakenWebSocket, WebSocketMessage } from '@/utils/websocketManager';
+import { WebSocketManager, getKrakenWebSocket } from '@/utils/websocketManager';
 import { useKrakenApi } from '@/hooks/useKrakenApi';
-
-interface TradingContextType {
-  apiKey: string;
-  apiSecret: string;
-  isApiConfigured: boolean;
-  isConnected: boolean;
-  setApiCredentials: (key: string, secret: string) => void;
-  clearApiCredentials: () => void;
-  showApiKeyModal: () => void;
-  hideApiKeyModal: () => void;
-  isApiKeyModalOpen: boolean;
-  selectedStrategy: string;
-  setSelectedStrategy: (strategy: string) => void;
-  isRunning: boolean;
-  toggleRunning: () => void;
-  currentBalance: Record<string, number>;
-  activePositions: any[];
-  tradeHistory: any[];
-  lastTickerData: Record<string, any>;
-  connectionStatus: string;
-  lastConnectionEvent: string;
-}
+import { setupWebSocket } from '@/utils/tradingWebSocket';
+import { startTradingBot, stopTradingBot } from '@/utils/tradingBot';
+import { useApiCredentials } from '@/hooks/useApiCredentials';
+import { TradingContextType } from '@/types/trading';
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
@@ -32,10 +15,7 @@ interface TradingProviderProps {
 }
 
 export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) => {
-  const [apiKey, setApiKey] = useState<string>('');
-  const [apiSecret, setApiSecret] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [selectedStrategy, setSelectedStrategy] = useState<string>('trend_following');
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [currentBalance, setCurrentBalance] = useState<Record<string, number>>({
@@ -50,17 +30,32 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
   const [lastConnectionEvent, setLastConnectionEvent] = useState<string>('');
   const [wsManager, setWsManager] = useState<WebSocketManager | null>(null);
 
-  const krakenApi = useKrakenApi({ apiKey, apiSecret });
-
-  useEffect(() => {
-    const savedApiKey = localStorage.getItem('krakenApiKey');
-    const savedApiSecret = localStorage.getItem('krakenApiSecret');
-    
-    if (savedApiKey && savedApiSecret) {
-      setApiKey(savedApiKey);
-      setApiSecret(savedApiSecret);
+  const connectToKraken = async () => {
+    try {
+      if (krakenApi.connect) {
+        await krakenApi.connect();
+        setIsConnected(true);
+        toast.success('Connected to Kraken API');
+      }
+    } catch (error) {
+      console.error('Failed to connect to Kraken API:', error);
+      setIsConnected(false);
+      toast.error('Failed to connect to Kraken API');
     }
-  }, []);
+  };
+
+  const {
+    apiKey,
+    apiSecret,
+    isApiConfigured,
+    isApiKeyModalOpen,
+    setApiCredentials,
+    clearApiCredentials,
+    showApiKeyModal,
+    hideApiKeyModal
+  } = useApiCredentials(connectToKraken);
+
+  const krakenApi = useKrakenApi({ apiKey, apiSecret });
 
   useEffect(() => {
     if (apiKey && apiSecret) {
@@ -76,55 +71,22 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
       const ws = getKrakenWebSocket();
       setWsManager(ws);
       
-      ws.connect()
-        .then(() => {
-          setConnectionStatus('Connected to WebSocket');
-          setLastConnectionEvent(`Connected at ${new Date().toLocaleTimeString()}`);
-          toast.success('Connected to Kraken WebSocket');
-          
-          const pairs = ['XBT/USD', 'ETH/USD', 'XRP/USD'];
-          pairs.forEach(pair => {
-            ws.send({
-              method: 'subscribe',
-              params: {
-                name: 'ticker',
-                pair: [pair]
-              }
-            });
-          });
-          
-          const unsubscribe = ws.subscribe((message: WebSocketMessage) => {
-            console.log('Received WebSocket message:', message);
-            
-            if (message.type === 'ticker') {
-              setLastTickerData(prev => ({
-                ...prev,
-                [message.data.pair]: message.data
-              }));
-            } else if (message.type === 'systemStatus') {
-              setConnectionStatus(`System Status: ${message.data.status}`);
-              setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
-            }
-          });
-          
-          return () => {
-            unsubscribe();
-            ws.disconnect();
-          };
-        })
-        .catch(error => {
-          console.error('WebSocket connection failed:', error);
-          setConnectionStatus('WebSocket connection failed');
-          setLastConnectionEvent(`Failed at ${new Date().toLocaleTimeString()}`);
-          toast.error('Failed to connect to Kraken WebSocket');
-        });
+      const cleanup = setupWebSocket(
+        ws,
+        setConnectionStatus,
+        setLastConnectionEvent,
+        setLastTickerData
+      );
+      
+      return () => {
+        if (typeof cleanup === 'function') {
+          cleanup();
+        }
+        if (wsManager) {
+          wsManager.disconnect();
+        }
+      };
     }
-    
-    return () => {
-      if (wsManager) {
-        wsManager.disconnect();
-      }
-    };
   }, [isConnected]);
 
   useEffect(() => {
@@ -164,45 +126,18 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
     }
   }, [isConnected, krakenApi.isConnected]);
 
-  const connectToKraken = async () => {
-    try {
-      if (krakenApi.connect) {
-        await krakenApi.connect();
-        setIsConnected(true);
-        toast.success('Connected to Kraken API');
-      }
-    } catch (error) {
-      console.error('Failed to connect to Kraken API:', error);
-      setIsConnected(false);
-      toast.error('Failed to connect to Kraken API');
-    }
-  };
-
-  const setApiCredentials = (key: string, secret: string) => {
-    setApiKey(key);
-    setApiSecret(secret);
-    localStorage.setItem('krakenApiKey', key);
-    localStorage.setItem('krakenApiSecret', secret);
-  };
-
-  const clearApiCredentials = () => {
-    setApiKey('');
-    setApiSecret('');
-    localStorage.removeItem('krakenApiKey');
-    localStorage.removeItem('krakenApiSecret');
-    setIsConnected(false);
-    setConnectionStatus('Disconnected');
-    toast.info('API credentials cleared');
-  };
-
-  const showApiKeyModal = () => setIsApiKeyModalOpen(true);
-  const hideApiKeyModal = () => setIsApiKeyModalOpen(false);
-
   const toggleRunning = () => {
     if (!isRunning && isConnected) {
       setIsRunning(true);
       toast.success('Trading bot started');
-      startTradingBot();
+      startTradingBot(
+        true,
+        selectedStrategy,
+        krakenApi.sendOrder,
+        krakenApi.fetchBalance,
+        krakenApi.fetchOpenPositions,
+        krakenApi.fetchTradeHistory
+      );
     } else if (isRunning) {
       setIsRunning(false);
       toast.info('Trading bot stopped');
@@ -212,61 +147,10 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
     }
   };
 
-  const startTradingBot = () => {
-    if (!krakenApi.sendOrder) {
-      toast.error('Trading API not available');
-      return;
-    }
-    
-    console.log(`Trading bot started with strategy: ${selectedStrategy}`);
-    
-    const botInterval = setInterval(() => {
-      if (!isRunning) {
-        clearInterval(botInterval);
-        return;
-      }
-      
-      console.log(`Bot executing strategy: ${selectedStrategy}`);
-      
-      if (Math.random() > 0.95) {
-        const orderType = Math.random() > 0.5 ? 'buy' : 'sell';
-        const exampleOrder = {
-          pair: 'XBT/USD',
-          type: orderType as 'buy' | 'sell',
-          ordertype: 'market',
-          volume: '0.001'
-        };
-        
-        console.log('Trading bot preparing to place order:', exampleOrder);
-        
-        krakenApi.sendOrder(exampleOrder)
-          .then(() => {
-            toast.success(`${exampleOrder.type.toUpperCase()} order placed for ${exampleOrder.volume} ${exampleOrder.pair}`);
-            krakenApi.fetchBalance();
-            krakenApi.fetchOpenPositions();
-            krakenApi.fetchTradeHistory();
-          })
-          .catch(error => {
-            console.error('Order failed:', error);
-            toast.error(`Order failed: ${error.message || 'Unknown error'}`);
-          });
-      }
-    }, 10000);
-    
-    window.botInterval = botInterval;
-  };
-
-  const stopTradingBot = () => {
-    if (window.botInterval) {
-      clearInterval(window.botInterval);
-      console.log('Trading bot stopped');
-    }
-  };
-
-  const value = {
+  const value: TradingContextType = {
     apiKey,
     apiSecret,
-    isApiConfigured: !!(apiKey && apiSecret),
+    isApiConfigured,
     isConnected,
     setApiCredentials,
     clearApiCredentials,
