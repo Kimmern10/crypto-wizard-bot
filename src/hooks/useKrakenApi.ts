@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import { getKrakenWebSocket, WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
@@ -443,9 +444,10 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       }
       
       const { data: session } = await supabase.auth.getSession();
-      if (session.session && result.result && Array.isArray(result.result.txid) && result.result.txid.length > 0) {
+      if (session.session && result.result && result.result.txid && Array.isArray(result.result.txid) && result.result.txid.length > 0) {
         try {
           const price = params.price || '0';
+          // Fix: The insert operation expects an array of objects or a single object, not an array with a single object
           await supabase.from('trade_history').insert({
             user_id: session.session.user.id,
             pair: params.pair,
