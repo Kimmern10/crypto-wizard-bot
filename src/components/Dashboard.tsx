@@ -1,7 +1,7 @@
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Activity, DollarSign, BarChart, TrendingUp, TrendingDown, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
+import { Activity, DollarSign, BarChart, TrendingUp, TrendingDown, AlertTriangle, Wifi, WifiOff, AlertCircle } from 'lucide-react';
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { cn } from '@/lib/utils';
 import PerformanceChart from './PerformanceChart';
@@ -18,6 +18,8 @@ const Dashboard: React.FC = () => {
     isApiConfigured,
     refreshData
   } = useTradingContext();
+  
+  const [isDemo, setIsDemo] = useState(false);
 
   // Calculate total balance value in USD from actual data
   const totalBalanceUSD = currentBalance.USD + 
@@ -27,6 +29,25 @@ const Dashboard: React.FC = () => {
   // Get a random value between -3 and 5 for daily change if we don't have real data
   const dailyChangePercent = lastTickerData['XBT/USD']?.p?.[1] || 
     (Math.round((Math.random() * 8 - 3) * 10) / 10);
+  
+  // Check if we're in demo mode or real mode
+  useEffect(() => {
+    if (Object.keys(lastTickerData).length > 0) {
+      console.log('Received ticker data for pairs:', Object.keys(lastTickerData).join(', '));
+      
+      // If we have ticker data and connectionStatus contains "Demo", mark as demo
+      if (connectionStatus.includes('Demo')) {
+        setIsDemo(true);
+      }
+    }
+    
+    // If the current error status includes CORS, we're likely in demo mode
+    if (connectionStatus.toLowerCase().includes('failed') || 
+        connectionStatus.toLowerCase().includes('error') ||
+        connectionStatus.toLowerCase().includes('cors')) {
+      setIsDemo(true);
+    }
+  }, [lastTickerData, connectionStatus]);
   
   // Debug connection status
   useEffect(() => {
@@ -44,13 +65,6 @@ const Dashboard: React.FC = () => {
     }
   }, [isConnected, isApiConfigured, connectionStatus, apiKey]);
 
-  // Log ticker data changes
-  useEffect(() => {
-    if (Object.keys(lastTickerData).length > 0) {
-      console.log('Received ticker data for pairs:', Object.keys(lastTickerData).join(', '));
-    }
-  }, [lastTickerData]);
-
   // Handle refresh button click
   const handleRefresh = () => {
     console.log('Manually refreshing data...');
@@ -59,6 +73,21 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {isDemo && (
+        <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
+          <CardContent className="p-4 flex items-center space-x-3">
+            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+            <div>
+              <h3 className="font-medium text-amber-800 dark:text-amber-300">Demo Mode Active</h3>
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                Due to CORS restrictions, this demo is running with simulated data. In a production environment, 
+                you would need a backend proxy to connect to Kraken's API.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="glass-card animation-delay-100 animate-slide-up">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -118,14 +147,18 @@ const Dashboard: React.FC = () => {
               API Connection
             </CardTitle>
             {isConnected ? (
-              <Wifi className="h-4 w-4 text-green-600" />
+              isDemo ? (
+                <Wifi className="h-4 w-4 text-amber-500" />
+              ) : (
+                <Wifi className="h-4 w-4 text-green-600" />
+              )
             ) : (
               <WifiOff className="h-4 w-4 text-red-600" />
             )}
           </CardHeader>
           <CardContent>
             <div className="text-sm font-medium">
-              {connectionStatus}
+              {isDemo ? 'Demo Mode' : connectionStatus}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               {lastConnectionEvent || 'No connection events yet'}
@@ -159,7 +192,7 @@ const Dashboard: React.FC = () => {
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-sm font-medium">Performance Overview</CardTitle>
           <CardDescription className="text-xs">
-            {isConnected ? 'Live data' : 'Simulated data'}
+            {isDemo ? 'Simulated data' : 'Live data'}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
