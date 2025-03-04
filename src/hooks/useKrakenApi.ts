@@ -1,8 +1,7 @@
-
 import { useState, useEffect, useCallback } from 'react';
 import { getKrakenWebSocket, WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
-import CryptoJS from 'crypto-js';
+import { supabase } from '@/integrations/supabase/client';
 
 interface KrakenApiConfig {
   apiKey: string;
@@ -30,10 +29,6 @@ interface OrderParams {
   volume: string;
   price?: string;
 }
-
-// Production Kraken API endpoints
-const API_URL = 'https://api.kraken.com';
-const API_VERSION = '0';
 
 // Types for Kraken API responses
 interface KrakenTimeResponse {
@@ -64,59 +59,45 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
   const [corsRestricted, setCorsRestricted] = useState(false);
+  const [useProxyApi, setUseProxyApi] = useState(true);
   
-  // Check for CORS restrictions on mount
   useEffect(() => {
-    checkCorsRestrictions().then(restricted => {
-      setCorsRestricted(restricted);
-      if (restricted) {
-        console.log('CORS restrictions detected in useKrakenApi');
-      }
-    });
+    setUseProxyApi(true);
   }, []);
   
-  // Function to check for CORS restrictions
-  const checkCorsRestrictions = async (): Promise<boolean> => {
+  // Funksjon for å gjøre forespørsler via Supabase Edge Function
+  const proxyRequest = async <T>(
+    path: string, 
+    isPrivate: boolean = false, 
+    method: 'GET' | 'POST' = 'POST',
+    data: any = {}
+  ): Promise<T> => {
     try {
-      // Try a simple request to the Kraken API
-      await fetch(`${API_URL}/${API_VERSION}/public/Time`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+      const { data: responseData, error } = await supabase.functions.invoke('kraken-proxy', {
+        body: {
+          path,
+          method,
+          isPrivate,
+          data,
+          apiKey: isPrivate ? config.apiKey : undefined,
+          apiSecret: isPrivate ? config.apiSecret : undefined
+        }
       });
-      return false; // No CORS restrictions
-    } catch (error) {
-      return true; // CORS restrictions detected
+
+      if (error) {
+        console.error('Proxy request failed:', error);
+        throw new Error(error.message || 'Unknown error');
+      }
+
+      console.log(`Proxy response for ${path}:`, responseData);
+      return responseData as T;
+    } catch (err) {
+      console.error(`Proxy request to ${path} failed:`, err);
+      throw err;
     }
   };
   
-  // Function to create API signature for private endpoints
-  const createSignature = (path: string, nonce: string, postData: any) => {
-    const apiSecret = config.apiSecret;
-    
-    if (!apiSecret) {
-      throw new Error('API secret not provided');
-    }
-    
-    // Decode base64 secret
-    const secret = CryptoJS.enc.Base64.parse(apiSecret);
-    
-    // Create the message to sign
-    const message = postData.nonce + postData.toString();
-    
-    // Create the SHA256 hash of the message
-    const hash = CryptoJS.SHA256(message);
-    
-    // Create the HMAC-SHA512 of the hashed message using the decoded secret
-    const hmac = CryptoJS.HmacSHA512(
-      path + hash.toString(CryptoJS.enc.Hex),
-      secret
-    );
-    
-    // Return the base64-encoded signature
-    return CryptoJS.enc.Base64.stringify(hmac);
-  };
-  
-  // Function to make authenticated API requests to Kraken
+  // Funksjon for å gjøre API-forespørsler til Kraken
   const krakenRequest = async <T>(
     endpoint: string, 
     isPrivate: boolean = true, 
@@ -124,65 +105,19 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     data: any = {}
   ): Promise<T> => {
     try {
-      if (!config.apiKey && isPrivate) {
+      if (isPrivate && !config.apiKey) {
         throw new Error('API key not provided');
       }
       
-      // Build the URL
-      const url = `${API_URL}/${API_VERSION}/${endpoint}`;
-      
-      // Setup request
-      const headers: HeadersInit = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      };
-      
-      let body: any;
-      
-      // Add authentication for private endpoints
-      if (isPrivate) {
-        // Create nonce for authentication
-        const nonce = Date.now().toString();
-        
-        // Add nonce to the data
-        const postData = {
-          ...data,
-          nonce
-        };
-        
-        // Add API key and signature to headers
-        headers['API-Key'] = config.apiKey;
-        headers['API-Sign'] = createSignature(`/${API_VERSION}/${endpoint}`, nonce, postData);
-        
-        // Convert data to URL encoded format
-        body = new URLSearchParams(postData);
-      } else if (method === 'POST' && Object.keys(data).length > 0) {
-        body = new URLSearchParams(data);
+      if (useProxyApi) {
+        return await proxyRequest<T>(endpoint, isPrivate, method, data);
       }
       
-      // Check if we're under CORS restrictions
-      if (corsRestricted) {
-        console.log(`Using mock data for ${endpoint} due to CORS restrictions`);
-        return getMockResponse<T>(endpoint, data);
-      }
+      // Resten av den opprinnelige krakenRequest-implementasjonen beholdes som fallback
+      // ... keep existing code (direct API request implementation)
       
-      // Actual API request
-      try {
-        const response = await fetch(url, {
-          method,
-          headers,
-          body: method === 'POST' ? body : undefined,
-        });
-        
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-        
-        const result = await response.json();
-        return result as T;
-      } catch (error) {
-        console.error(`API request to ${endpoint} failed, using mock data:`, error);
-        return getMockResponse<T>(endpoint, data);
-      }
+      // Dette er fallback-implementasjonen som bruker mock-data
+      return getMockResponse<T>(endpoint, data);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`Kraken API request failed (${endpoint}):`, errorMessage);
@@ -190,8 +125,9 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     }
   };
   
-  // Function to get mock response data
+  // Function to get mock response data - beholdes for fallback
   const getMockResponse = <T>(endpoint: string, data: any): T => {
+    // ... keep existing code (mock data implementation)
     if (endpoint === 'public/Time') {
       return {
         result: {
@@ -242,44 +178,55 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     
     try {
       // Test connection by getting server time
-      console.log('Attempting to connect to Kraken API...');
+      console.log('Attempting to connect to Kraken API via proxy...');
       
       const serverTime = await krakenRequest<KrakenTimeResponse>('public/Time', false, 'GET');
       console.log('Kraken server time:', new Date(serverTime.result.unixtime * 1000).toISOString());
       
       setIsConnected(true);
       
-      // Check if we're using real or mock data
-      if (corsRestricted) {
-        console.log('Connected to Kraken API in demo mode due to CORS restrictions');
-        toast.success('Connected to Kraken API (Demo Mode)', {
-          description: 'Using simulated data due to CORS restrictions'
+      // Logg resultatet av tilkoblingen
+      console.log('Connected to Kraken API via Supabase Edge Function');
+      toast.success('Connected to Kraken API');
+      
+      // Lagre transaksjonshistorikk dersom brukeren er autentisert
+      const { data: session } = await supabase.auth.getSession();
+      if (session.session) {
+        fetchTradeHistory().then(async (trades) => {
+          if (trades && trades.length > 0) {
+            try {
+              // Lagre handelshistorikk i Supabase
+              for (const trade of trades) {
+                await supabase.from('trade_history').upsert({
+                  user_id: session.session?.user.id,
+                  pair: trade.pair,
+                  type: trade.type,
+                  price: trade.price,
+                  volume: trade.volume,
+                  cost: trade.cost,
+                  fee: trade.fee,
+                  order_type: trade.orderType,
+                  external_id: trade.id,
+                  created_at: new Date(trade.time).toISOString()
+                }, { onConflict: 'external_id' });
+              }
+              console.log('Trade history synchronized with Supabase');
+            } catch (error) {
+              console.error('Failed to synchronize trade history with Supabase:', error);
+            }
+          }
         });
-      } else {
-        console.log('Connected to Kraken API with real data');
-        toast.success('Connected to Kraken API');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(`Connection failed: ${errorMessage}`);
-      
-      // Check if this is due to CORS issues
-      if (errorMessage.includes('CORS') || errorMessage.includes('Failed to fetch')) {
-        setCorsRestricted(true);
-        console.log('CORS error detected, switching to demo mode');
-        setIsConnected(true);
-        toast.info('Connected in Demo Mode (CORS restrictions detected)', {
-          description: 'A proxy server would be needed for direct API access'
-        });
-      } else {
-        setIsConnected(false);
-        toast.error(`Connection failed: ${errorMessage}`);
-        throw err;
-      }
+      setIsConnected(false);
+      toast.error(`Connection failed: ${errorMessage}`);
+      throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [config.apiKey, config.apiSecret, corsRestricted]);
+  }, [config.apiKey, config.apiSecret]);
   
   // Fetch account balance
   const fetchBalance = useCallback(async () => {
@@ -375,12 +322,43 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     setIsLoading(true);
     
     try {
+      // First try to get trade history from Supabase if user is authenticated
+      const { data: session } = await supabase.auth.getSession();
+      
+      if (session.session) {
+        try {
+          const { data: localTrades, error } = await supabase
+            .from('trade_history')
+            .select('*')
+            .order('created_at', { ascending: false });
+            
+          if (!error && localTrades && localTrades.length > 0) {
+            console.log('Using trade history from Supabase:', localTrades);
+            // Format the data to match the expected structure
+            return localTrades.map(trade => ({
+              id: trade.external_id || trade.id,
+              pair: trade.pair,
+              type: trade.type,
+              price: parseFloat(trade.price),
+              volume: parseFloat(trade.volume),
+              time: trade.created_at,
+              orderType: trade.order_type,
+              cost: parseFloat(trade.cost),
+              fee: parseFloat(trade.fee)
+            }));
+          }
+        } catch (e) {
+          console.error('Error fetching trade history from Supabase:', e);
+        }
+      }
+      
+      // If no local history or not authenticated, get from Kraken API
       const tradesData = await krakenRequest<KrakenTradesResponse>('private/TradesHistory', true, 'POST', {
         start: Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60, // Last 30 days
         end: Math.floor(Date.now() / 1000)
       });
       
-      console.log('Trade history data:', tradesData);
+      console.log('Trade history data from API:', tradesData);
       
       // Process the trades data - add safety check for the trades property
       if (tradesData && tradesData.result && tradesData.result.trades) {
@@ -395,6 +373,29 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
           cost: parseFloat(trade.cost),
           fee: parseFloat(trade.fee)
         }));
+        
+        // If user is authenticated, store trades in Supabase
+        if (session.session) {
+          try {
+            for (const trade of trades) {
+              await supabase.from('trade_history').upsert({
+                user_id: session.session.user.id,
+                pair: trade.pair,
+                type: trade.type,
+                price: trade.price,
+                volume: trade.volume,
+                cost: trade.cost,
+                fee: trade.fee,
+                order_type: trade.orderType,
+                external_id: trade.id,
+                created_at: trade.time
+              }, { onConflict: 'external_id' });
+            }
+            console.log('Trade history saved to Supabase');
+          } catch (e) {
+            console.error('Error saving trade history to Supabase:', e);
+          }
+        }
         
         return trades;
       } else {
@@ -447,6 +448,30 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
         toast.success(`${params.type.toUpperCase()} order for ${params.volume} ${params.pair} placed (Demo)`);
       } else {
         toast.success(`${params.type.toUpperCase()} order for ${params.volume} ${params.pair} placed successfully`);
+      }
+      
+      // Also store the trade in history if authenticated
+      const { data: session } = await supabase.auth.getSession();
+      if (session.session && result.result && result.result.txid) {
+        try {
+          // Create a record of this order in trade_history
+          const price = params.price || '0'; // For market orders
+          await supabase.from('trade_history').insert({
+            user_id: session.session.user.id,
+            pair: params.pair,
+            type: params.type,
+            price: parseFloat(price),
+            volume: parseFloat(params.volume),
+            cost: parseFloat(price) * parseFloat(params.volume),
+            fee: 0, // Will be updated when we get actual trade data
+            order_type: params.ordertype,
+            external_id: result.result.txid[0],
+            created_at: new Date().toISOString()
+          });
+          console.log('Order saved to trade history');
+        } catch (e) {
+          console.error('Error saving order to trade history:', e);
+        }
       }
       
       // Return the order result

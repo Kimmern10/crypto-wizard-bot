@@ -1,6 +1,7 @@
 
 import { toast } from 'sonner';
 import { WebSocketManager, WebSocketMessage } from '@/utils/websocketManager';
+import { supabase } from '@/integrations/supabase/client';
 
 export const setupWebSocket = (
   wsManager: WebSocketManager, 
@@ -12,49 +13,83 @@ export const setupWebSocket = (
   setConnectionStatus('Checking connection method...');
   console.log('Determining best connection method for Kraken...');
   
-  // Check if the browser can make cross-origin requests to Kraken API
-  checkCorsRestrictions()
-    .then(hasCorsRestrictions => {
-      if (hasCorsRestrictions) {
-        console.log('CORS restrictions detected, enabling demo mode');
-        setConnectionStatus('CORS restrictions detected');
-        setLastConnectionEvent(`CORS check at ${new Date().toLocaleTimeString()}`);
+  // For Supabase-basert trading bots, bruk alltid demo-modus for WebSocket
+  // Men send faktiske ordre via Edge Function proxy
+  let demoModeReason = 'for WebSocket data feeds';
+  
+  // Sjekk om vi kan koble til WebSocket direkte
+  checkWebSocketConnection()
+    .then(canConnectWebSocket => {
+      if (canConnectWebSocket) {
+        console.log('Direct WebSocket connection is possible');
+        return connectAndSubscribe();
+      } else {
+        console.log('Direct WebSocket connection not available, using demo mode');
+        demoModeReason = 'WebSocket connection not available';
         
-        // Notify user about the CORS issue
-        toast.error('Cannot connect directly to Kraken due to CORS restrictions', {
-          description: 'A proxy server would be needed for direct connection in production.',
-          duration: 6000,
-        });
-        
-        // Set demo mode
+        // Set demo mode for the WebSocket only
         wsManager.setForceDemoMode(true);
         
         // Start demo data generation
         const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+        
+        // Notify the UI about the fallback
+        setConnectionStatus(`Demo Mode (${demoModeReason})`);
+        setLastConnectionEvent(`Switched to demo mode at ${new Date().toLocaleTimeString()}`);
         
         // Return cleanup function
         return () => {
           cleanupDemoData();
           wsManager.disconnect();
         };
-      } else {
-        // No CORS restrictions, try normal WebSocket connection
-        return connectAndSubscribe();
       }
     })
     .catch(error => {
-      console.error('Error checking CORS restrictions:', error);
-      setConnectionStatus('Connection check failed');
+      console.error('Error checking WebSocket connection:', error);
+      demoModeReason = 'connection check failed';
       
       // Fallback to demo mode
       wsManager.setForceDemoMode(true);
       const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+      
+      // Notify the UI
+      setConnectionStatus(`Demo Mode (${demoModeReason})`);
+      setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
       
       return () => {
         cleanupDemoData();
         wsManager.disconnect();
       };
     });
+  
+  // Kontroller om WebSocket-tilkobling er mulig
+  async function checkWebSocketConnection(): Promise<boolean> {
+    try {
+      return new Promise((resolve) => {
+        const ws = new WebSocket('wss://ws.kraken.com');
+        
+        // Sett en timeout i tilfelle tilkoblingen henger
+        const timeout = setTimeout(() => {
+          ws.close();
+          resolve(false);
+        }, 5000);
+        
+        ws.onopen = () => {
+          clearTimeout(timeout);
+          ws.close();
+          resolve(true);
+        };
+        
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          resolve(false);
+        };
+      });
+    } catch (error) {
+      console.error('Error checking WebSocket connection:', error);
+      return false;
+    }
+  }
   
   // Function to check if there are CORS restrictions
   async function checkCorsRestrictions(): Promise<boolean> {
@@ -133,6 +168,18 @@ export const setupWebSocket = (
         if (reconnectCount === 1 || reconnectCount % 3 === 0) {
           toast.error('Failed to connect to Kraken WebSocket');
         }
+        
+        // Fallback to demo data after multiple reconnection failures
+        if (reconnectCount >= 3) {
+          console.log('Multiple WebSocket connection failures, switching to demo data');
+          wsManager.setForceDemoMode(true);
+          const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+          setConnectionStatus('Demo Mode (WebSocket connection failed)');
+          
+          return () => {
+            cleanupDemoData();
+          };
+        }
       });
     
     // Register handler for incoming messages
@@ -183,6 +230,35 @@ export const setupWebSocket = (
   const simulateDemoTickerData = (
     setLastTickerData: (updateFn: (prev: Record<string, any>) => Record<string, any>) => void
   ) => {
+    // Hent markedsdata fra en offentlig API hvis tilgjengelig
+    const fetchMarketPrices = async () => {
+      try {
+        // Eksempel på bruk av Edge Function for å hente prisdata
+        const { data, error } = await supabase.functions.invoke('kraken-proxy', {
+          body: {
+            path: 'public/Ticker',
+            method: 'GET',
+            isPrivate: false,
+            data: {
+              pair: 'XXBTZUSD,XETHZUSD,XRPZUSD,DOTZUSD,ADAZUSD'
+            }
+          }
+        });
+        
+        if (error) {
+          console.error('Error fetching market prices:', error);
+          return null;
+        }
+        
+        console.log('Fetched market prices from API:', data);
+        return data.result;
+      } catch (error) {
+        console.error('Failed to fetch market prices:', error);
+        return null;
+      }
+    };
+    
+    // Initialiser demo-data
     const demoData = {
       'XBT/USD': {
         c: ['36750.50', '0.05'],
@@ -236,6 +312,38 @@ export const setupWebSocket = (
       }
     };
     
+    // Oppdater med faktiske markedspriser hvis de er tilgjengelige
+    fetchMarketPrices().then(prices => {
+      if (prices) {
+        // Mapping fra Kraken API-symboler til våre symboler
+        const symbolMap: Record<string, string> = {
+          'XXBTZUSD': 'XBT/USD',
+          'XETHZUSD': 'ETH/USD',
+          'XRPZUSD': 'XRP/USD',
+          'DOTZUSD': 'DOT/USD',
+          'ADAZUSD': 'ADA/USD'
+        };
+        
+        // Oppdater demo-dataene med faktiske priser
+        Object.entries(prices).forEach(([apiSymbol, tickerData]: [string, any]) => {
+          const symbol = symbolMap[apiSymbol] || apiSymbol;
+          if (demoData[symbol]) {
+            demoData[symbol].c[0] = tickerData.c[0];
+            demoData[symbol].h[0] = tickerData.h[0];
+            demoData[symbol].l[0] = tickerData.l[0];
+            demoData[symbol].o[0] = tickerData.o[0];
+            console.log(`Updated demo data for ${symbol} with real market price: ${tickerData.c[0]}`);
+          }
+        });
+        
+        // Oppdater state med de oppdaterte dataene
+        setLastTickerData(prev => ({
+          ...prev,
+          ...demoData
+        }));
+      }
+    });
+    
     // Update ticker data with demo values
     setLastTickerData(prev => ({
       ...prev,
@@ -261,7 +369,44 @@ export const setupWebSocket = (
       }));
     }, 10000);
     
-    return () => clearInterval(updateInterval);
+    // Hent faktiske markedspriser en gang i minuttet
+    const marketUpdateInterval = setInterval(() => {
+      fetchMarketPrices().then(prices => {
+        if (prices) {
+          // Mapping fra Kraken API-symboler til våre symboler
+          const symbolMap: Record<string, string> = {
+            'XXBTZUSD': 'XBT/USD',
+            'XETHZUSD': 'ETH/USD',
+            'XRPZUSD': 'XRP/USD',
+            'DOTZUSD': 'DOT/USD',
+            'ADAZUSD': 'ADA/USD'
+          };
+          
+          // Oppdater demo-dataene med faktiske priser
+          Object.entries(prices).forEach(([apiSymbol, tickerData]: [string, any]) => {
+            const symbol = symbolMap[apiSymbol] || apiSymbol;
+            if (demoData[symbol]) {
+              demoData[symbol].c[0] = tickerData.c[0];
+              demoData[symbol].h[0] = tickerData.h[0];
+              demoData[symbol].l[0] = tickerData.l[0];
+              demoData[symbol].o[0] = tickerData.o[0];
+              console.log(`Updated demo data for ${symbol} with real market price: ${tickerData.c[0]}`);
+            }
+          });
+          
+          // Oppdater state med de oppdaterte dataene
+          setLastTickerData(prev => ({
+            ...prev,
+            ...demoData
+          }));
+        }
+      });
+    }, 60000); // Hver minutt
+    
+    return () => {
+      clearInterval(updateInterval);
+      clearInterval(marketUpdateInterval);
+    };
   };
   
   // Return a cleanup function

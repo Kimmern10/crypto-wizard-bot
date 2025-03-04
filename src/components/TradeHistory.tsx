@@ -1,14 +1,29 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { History, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
+import { supabase } from '@/integrations/supabase/client';
 
 const TradeHistory: React.FC = () => {
-  const { tradeHistory, isConnected } = useTradingContext();
+  const { tradeHistory, isConnected, refreshData } = useTradingContext();
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+
+  // Sjekk om brukeren er autentisert
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        // Hvis autentisert, oppdater handelshistorikk
+        refreshData();
+      }
+    };
+    
+    checkAuth();
+  }, [refreshData]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -18,6 +33,15 @@ const TradeHistory: React.FC = () => {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshData();
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   return (
@@ -33,9 +57,15 @@ const TradeHistory: React.FC = () => {
           </div>
           
           {isConnected && (
-            <Button variant="outline" size="sm" className="flex items-center gap-1.5">
-              <RefreshCw className="h-3.5 w-3.5" />
-              <span>Refresh</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex items-center gap-1.5"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
             </Button>
           )}
         </div>
