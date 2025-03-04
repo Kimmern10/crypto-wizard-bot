@@ -85,11 +85,13 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         
         // Fix the WebSocket disconnect issue
         if (wsManager) {
-          // Explicitly cast to any to bypass TypeScript's type checking
-          // This is safe because we're checking if the method exists first
-          const manager = wsManager as any;
-          if (manager && typeof manager.disconnect === 'function') {
-            manager.disconnect();
+          try {
+            // Using the disconnect method from WebSocketManager instance
+            if (typeof wsManager.disconnect === 'function') {
+              wsManager.disconnect();
+            }
+          } catch (error) {
+            console.error('Error disconnecting WebSocket:', error);
           }
         }
       };
@@ -190,4 +192,3 @@ export const useTradingContext = () => {
   }
   return context;
 };
-
