@@ -94,7 +94,11 @@ export const useApiCredentials = (
           // Oppdater eksisterende nøkler
           const { error } = await supabase
             .from('api_credentials')
-            .update({ api_key: key, api_secret: secret, updated_at: new Date() })
+            .update({ 
+              api_key: key, 
+              api_secret: secret, 
+              updated_at: new Date().toISOString() // Konverterer Date til string
+            })
             .eq('id', existingData.id);
           
           if (error) {
@@ -108,6 +112,7 @@ export const useApiCredentials = (
           const { error } = await supabase
             .from('api_credentials')
             .insert({
+              user_id: sessionData.session.user.id, // Legg til user_id
               exchange: 'kraken',
               api_key: key,
               api_secret: secret

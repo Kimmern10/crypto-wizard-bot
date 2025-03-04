@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import CryptoJS from 'https://cdn.skypack.dev/crypto-js';
 
-// CORS headers for alle respons
+// CORS headers for alle responser
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -19,6 +19,8 @@ serve(async (req) => {
   }
 
   try {
+    console.log('Proxy mottok forespørsel:', req.url);
+    
     // Parse forespørselsdata
     const { path, method, isPrivate, data, apiKey, apiSecret } = await req.json();
     
@@ -34,6 +36,7 @@ serve(async (req) => {
 
     // Bygg URL
     const url = `${API_URL}/${API_VERSION}/${path}`;
+    console.log(`Sender forespørsel til: ${url}`);
     
     // Sett opp forespørselsvalg
     const options: RequestInit = {
@@ -71,15 +74,30 @@ serve(async (req) => {
     if (method === 'POST' || isPrivate) {
       const formBody = new URLSearchParams(bodyData).toString();
       options.body = formBody;
+      console.log(`Forberedt request body: ${formBody}`);
     }
 
-    console.log(`Sender forespørsel til Kraken API: ${url}`);
+    console.log(`Sender forespørsel til Kraken API: ${url} med metode ${options.method}`);
     
     // Send forespørsel til Kraken API
     const response = await fetch(url, options);
-    const responseData = await response.json();
+    const responseText = await response.text();
     
     console.log(`Fikk svar fra Kraken API med status: ${response.status}`);
+    console.log(`Response tekst: ${responseText.substring(0, 200)}...`);
+    
+    let responseData;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      console.error(`Feil ved parsing av JSON-svar: ${e.message}`);
+      responseData = { error: `Ugyldig JSON-svar: ${responseText.substring(0, 100)}...` };
+    }
+    
+    // Sjekk om Kraken API returnerte feil
+    if (responseData.error && responseData.error.length > 0) {
+      console.error(`Kraken API returnerte feil: ${JSON.stringify(responseData.error)}`);
+    }
 
     // Returner data med CORS-headers
     return new Response(JSON.stringify(responseData), {
