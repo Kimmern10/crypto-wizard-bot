@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { WebSocketManager, getKrakenWebSocket } from '@/utils/websocketManager';
 import { useKrakenApi } from '@/hooks/useKrakenApi';
 import { setupWebSocket } from '@/utils/tradingWebSocket';
-import { startTradingBot, stopTradingBot } from '@/utils/tradingBot';
+import { startTradingBot, stopTradingBot, getBotStatus } from '@/utils/tradingBot';
 import { useApiCredentials } from '@/hooks/useApiCredentials';
 import { TradingContextType } from '@/types/trading';
 
@@ -29,6 +29,15 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
   const [connectionStatus, setConnectionStatus] = useState<string>('Disconnected');
   const [lastConnectionEvent, setLastConnectionEvent] = useState<string>('');
   const [wsManager, setWsManager] = useState<WebSocketManager | null>(null);
+  const [strategyParams, setStrategyParams] = useState({
+    riskLevel: 50,
+    positionSize: 5,
+    takeProfitEnabled: true,
+    stopLossEnabled: true,
+    takeProfitPercentage: 3.5,
+    stopLossPercentage: 2.5,
+    useMlOptimization: true
+  });
 
   const connectToKraken = async () => {
     try {
@@ -67,73 +76,75 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
   }, [apiKey, apiSecret]);
 
   useEffect(() => {
+    let cleanupWs: (() => void) | undefined;
+    
     if (isConnected) {
       const ws = getKrakenWebSocket();
       setWsManager(ws);
       
-      const cleanup = setupWebSocket(
+      // Setup WebSocket with appropriate handlers
+      cleanupWs = setupWebSocket(
         ws,
         setConnectionStatus,
         setLastConnectionEvent,
         setLastTickerData
       );
-      
-      return () => {
-        if (typeof cleanup === 'function') {
-          cleanup();
-        }
-        
-        // Fix the WebSocket disconnect issue
-        if (wsManager) {
-          try {
-            // Using the disconnect method from WebSocketManager instance
-            if (typeof wsManager.disconnect === 'function') {
-              wsManager.disconnect();
-            }
-          } catch (error) {
-            console.error('Error disconnecting WebSocket:', error);
-          }
-        }
-      };
     }
+    
+    return () => {
+      // Clean up WebSocket on unmount
+      if (cleanupWs) {
+        cleanupWs();
+      }
+      
+      // Also ensure bot is stopped on unmount
+      if (isRunning) {
+        stopTradingBot();
+        setIsRunning(false);
+      }
+    };
   }, [isConnected]);
 
+  // Fetch account data periodically when connected
   useEffect(() => {
-    if (isConnected && krakenApi.isConnected) {
-      krakenApi.fetchBalance()
-        .then(balanceData => {
-          if (balanceData) {
-            setCurrentBalance(balanceData);
-          }
-        })
-        .catch(error => {
-          console.error('Failed to fetch account balance:', error);
-          toast.error('Failed to fetch account balance');
-        });
-      
-      krakenApi.fetchOpenPositions()
-        .then(positionsData => {
-          if (positionsData) {
-            setActivePositions(positionsData);
-          }
-        })
-        .catch(error => {
-          console.error('Failed to fetch open positions:', error);
-          toast.error('Failed to fetch open positions');
-        });
-      
-      krakenApi.fetchTradeHistory()
-        .then(tradesData => {
-          if (tradesData) {
-            setTradeHistory(tradesData);
-          }
-        })
-        .catch(error => {
-          console.error('Failed to fetch trade history:', error);
-          toast.error('Failed to fetch trade history');
-        });
-    }
+    if (!isConnected || !krakenApi.isConnected) return;
+    
+    // Initial fetch
+    fetchAccountData();
+    
+    // Setup interval for periodic updates
+    const dataRefreshInterval = setInterval(fetchAccountData, 60000); // Every minute
+    
+    return () => {
+      clearInterval(dataRefreshInterval);
+    };
   }, [isConnected, krakenApi.isConnected]);
+
+  const fetchAccountData = async () => {
+    if (!isConnected || !krakenApi.isConnected) return;
+    
+    try {
+      // Fetch balance data
+      const balanceData = await krakenApi.fetchBalance();
+      if (balanceData) {
+        setCurrentBalance(balanceData);
+      }
+      
+      // Fetch positions
+      const positionsData = await krakenApi.fetchOpenPositions();
+      if (positionsData) {
+        setActivePositions(positionsData);
+      }
+      
+      // Fetch trade history
+      const tradesData = await krakenApi.fetchTradeHistory();
+      if (tradesData) {
+        setTradeHistory(tradesData);
+      }
+    } catch (error) {
+      console.error('Failed to fetch account data:', error);
+    }
+  };
 
   const toggleRunning = () => {
     if (!isRunning && isConnected) {
@@ -145,7 +156,8 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
         krakenApi.sendOrder,
         krakenApi.fetchBalance,
         krakenApi.fetchOpenPositions,
-        krakenApi.fetchTradeHistory
+        krakenApi.fetchTradeHistory,
+        strategyParams
       );
     } else if (isRunning) {
       setIsRunning(false);
@@ -154,6 +166,14 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
     } else {
       toast.error('Please connect to the Kraken API first');
     }
+  };
+
+  // Update strategy parameters
+  const updateStrategyParams = (params: Partial<typeof strategyParams>) => {
+    setStrategyParams(prev => ({
+      ...prev,
+      ...params
+    }));
   };
 
   const value: TradingContextType = {
@@ -175,7 +195,10 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
     tradeHistory,
     lastTickerData,
     connectionStatus,
-    lastConnectionEvent
+    lastConnectionEvent,
+    strategyParams,
+    updateStrategyParams,
+    refreshData: fetchAccountData
   };
 
   return (

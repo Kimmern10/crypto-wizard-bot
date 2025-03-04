@@ -8,46 +8,102 @@ export const setupWebSocket = (
   setLastConnectionEvent: (event: string) => void,
   setLastTickerData: (updateFn: (prev: Record<string, any>) => Record<string, any>) => void
 ) => {
-  wsManager.connect()
-    .then(() => {
-      setConnectionStatus('Connected to WebSocket');
-      setLastConnectionEvent(`Connected at ${new Date().toLocaleTimeString()}`);
-      toast.success('Connected to Kraken WebSocket');
-      
-      const pairs = ['XBT/USD', 'ETH/USD', 'XRP/USD'];
-      pairs.forEach(pair => {
-        wsManager.send({
-          method: 'subscribe',
-          params: {
-            name: 'ticker',
-            pair: [pair]
+  // Log connecting status
+  setConnectionStatus('Connecting to Kraken WebSocket...');
+  
+  // Track reconnection attempts for UI feedback
+  let reconnectCount = 0;
+  
+  const connectAndSubscribe = () => {
+    wsManager.connect()
+      .then(() => {
+        setConnectionStatus('Connected to WebSocket');
+        setLastConnectionEvent(`Connected at ${new Date().toLocaleTimeString()}`);
+        
+        // Only show toast on initial connection or after multiple reconnects
+        if (reconnectCount === 0 || reconnectCount > 2) {
+          toast.success('Connected to Kraken WebSocket');
+        }
+        
+        // Reset reconnect counter on successful connection
+        reconnectCount = 0;
+        
+        // Subscribe to ticker data for multiple pairs
+        const pairs = ['XBT/USD', 'ETH/USD', 'XRP/USD', 'DOT/USD', 'ADA/USD'];
+        
+        // Subscribe to each pair individually with a small delay
+        // to avoid overwhelming the WebSocket
+        pairs.forEach((pair, index) => {
+          setTimeout(() => {
+            if (wsManager.isConnected()) {
+              console.log(`Subscribing to ${pair} ticker...`);
+              wsManager.send({
+                method: 'subscribe',
+                params: {
+                  name: 'ticker',
+                  pair: [pair]
+                }
+              });
+            }
+          }, index * 300); // 300ms delay between subscriptions
+        });
+        
+        // Register handler for incoming messages
+        const unsubscribe = wsManager.subscribe((message: WebSocketMessage) => {
+          try {
+            if (message.type === 'ticker') {
+              // Update ticker data in state
+              setLastTickerData(prev => ({
+                ...prev,
+                [message.data.pair]: {
+                  ...message.data,
+                  timestamp: new Date().toISOString()
+                }
+              }));
+            } else if (message.type === 'systemStatus') {
+              setConnectionStatus(`System Status: ${message.data.status}`);
+              setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
+            } else if (message.type === 'error') {
+              console.error('WebSocket error message:', message.data);
+              setConnectionStatus(`Error: ${message.data.errorMessage || 'Unknown error'}`);
+              setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
+              toast.error(`WebSocket error: ${message.data.errorMessage || 'Unknown error'}`);
+            }
+          } catch (error) {
+            console.error('Error processing WebSocket message:', error);
           }
         });
-      });
-      
-      const unsubscribe = wsManager.subscribe((message: WebSocketMessage) => {
-        console.log('Received WebSocket message:', message);
         
-        if (message.type === 'ticker') {
-          setLastTickerData(prev => ({
-            ...prev,
-            [message.data.pair]: message.data
-          }));
-        } else if (message.type === 'systemStatus') {
-          setConnectionStatus(`System Status: ${message.data.status}`);
-          setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
+        return unsubscribe;
+      })
+      .catch(error => {
+        reconnectCount++;
+        console.error('WebSocket connection failed:', error);
+        setConnectionStatus(`WebSocket connection failed (attempt ${reconnectCount})`);
+        setLastConnectionEvent(`Failed at ${new Date().toLocaleTimeString()}`);
+        
+        // Only show toast on initial failure or after multiple reconnects
+        if (reconnectCount === 1 || reconnectCount % 3 === 0) {
+          toast.error('Failed to connect to Kraken WebSocket');
         }
+        
+        // Attempt to reconnect after a delay
+        setTimeout(connectAndSubscribe, 5000);
       });
-      
-      return () => {
-        unsubscribe();
+  };
+  
+  // Start initial connection
+  connectAndSubscribe();
+  
+  // Return a cleanup function
+  return () => {
+    try {
+      if (wsManager && wsManager.isConnected()) {
         wsManager.disconnect();
-      };
-    })
-    .catch(error => {
-      console.error('WebSocket connection failed:', error);
-      setConnectionStatus('WebSocket connection failed');
-      setLastConnectionEvent(`Failed at ${new Date().toLocaleTimeString()}`);
-      toast.error('Failed to connect to Kraken WebSocket');
-    });
+        console.log('WebSocket connection closed by cleanup');
+      }
+    } catch (error) {
+      console.error('Error during WebSocket cleanup:', error);
+    }
+  };
 };

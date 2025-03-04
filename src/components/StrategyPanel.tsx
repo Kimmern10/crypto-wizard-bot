@@ -7,7 +7,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useTradingContext } from '@/hooks/useTradingContext';
-import { Play, Square, Sliders, ChevronsUpDown, Brain, TrendingUp, ArrowDownUp, BadgeAlert } from 'lucide-react';
+import { Play, Square, Sliders, ChevronsUpDown, Brain, TrendingUp, ArrowDownUp, BadgeAlert, RefreshCw } from 'lucide-react';
 
 const strategyOptions = [
   {
@@ -46,10 +46,25 @@ const StrategyPanel: React.FC = () => {
     setSelectedStrategy, 
     isRunning, 
     toggleRunning,
-    isConnected
+    isConnected,
+    strategyParams,
+    updateStrategyParams,
+    refreshData
   } = useTradingContext();
   
   const selectedStrategyDetails = strategyOptions.find(strategy => strategy.id === selectedStrategy);
+
+  const handleRiskLevelChange = (value: number[]) => {
+    updateStrategyParams({ riskLevel: value[0] });
+  };
+
+  const handlePositionSizeChange = (value: number[]) => {
+    updateStrategyParams({ positionSize: value[0] });
+  };
+
+  const handleRefreshData = () => {
+    refreshData();
+  };
 
   return (
     <Card className="glass-card">
@@ -63,23 +78,36 @@ const StrategyPanel: React.FC = () => {
             <CardDescription>Configure and activate your trading strategy</CardDescription>
           </div>
           
-          <Button
-            variant={isRunning ? "destructive" : "default"}
-            size="sm"
-            onClick={toggleRunning}
-            disabled={!isConnected}
-            className="flex items-center gap-1"
-          >
-            {isRunning ? (
-              <>
-                <Square className="h-4 w-4" /> Stop
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" /> Start
-              </>
-            )}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleRefreshData}
+              disabled={!isConnected}
+              className="h-8 w-8"
+              title="Refresh Data"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            
+            <Button
+              variant={isRunning ? "destructive" : "default"}
+              size="sm"
+              onClick={toggleRunning}
+              disabled={!isConnected}
+              className="flex items-center gap-1"
+            >
+              {isRunning ? (
+                <>
+                  <Square className="h-4 w-4" /> Stop
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" /> Start
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       
@@ -125,12 +153,13 @@ const StrategyPanel: React.FC = () => {
           <div className="space-y-2">
             <div className="flex justify-between items-center">
               <Label>Risk Level</Label>
-              <span className="text-xs text-muted-foreground">Medium</span>
+              <span className="text-xs text-muted-foreground">{strategyParams.riskLevel}%</span>
             </div>
             <Slider 
-              defaultValue={[50]} 
+              value={[strategyParams.riskLevel]} 
               max={100} 
               step={1}
+              onValueChange={handleRiskLevelChange}
               disabled={isRunning} 
               className="py-1"
             />
@@ -139,12 +168,13 @@ const StrategyPanel: React.FC = () => {
           <div className="space-y-2">
             <div className="flex justify-between items-center">
               <Label>Position Size (% of available funds)</Label>
-              <span className="text-xs text-muted-foreground">5%</span>
+              <span className="text-xs text-muted-foreground">{strategyParams.positionSize}%</span>
             </div>
             <Slider 
-              defaultValue={[5]} 
+              value={[strategyParams.positionSize]} 
               max={50} 
               step={1}
+              onValueChange={handlePositionSizeChange}
               disabled={isRunning} 
               className="py-1"
             />
@@ -154,22 +184,37 @@ const StrategyPanel: React.FC = () => {
             <div className="flex items-center justify-between">
               <Label>Take Profit</Label>
               <div className="flex items-center space-x-2">
-                <Switch id="take-profit" defaultChecked disabled={isRunning} />
-                <span className="text-xs text-muted-foreground">3.5%</span>
+                <Switch 
+                  id="take-profit" 
+                  checked={strategyParams.takeProfitEnabled}
+                  onCheckedChange={(checked) => updateStrategyParams({ takeProfitEnabled: checked })}
+                  disabled={isRunning} 
+                />
+                <span className="text-xs text-muted-foreground">{strategyParams.takeProfitPercentage}%</span>
               </div>
             </div>
             
             <div className="flex items-center justify-between">
               <Label>Stop Loss</Label>
               <div className="flex items-center space-x-2">
-                <Switch id="stop-loss" defaultChecked disabled={isRunning} />
-                <span className="text-xs text-muted-foreground">2.5%</span>
+                <Switch 
+                  id="stop-loss" 
+                  checked={strategyParams.stopLossEnabled}
+                  onCheckedChange={(checked) => updateStrategyParams({ stopLossEnabled: checked })} 
+                  disabled={isRunning} 
+                />
+                <span className="text-xs text-muted-foreground">{strategyParams.stopLossPercentage}%</span>
               </div>
             </div>
             
             <div className="flex items-center justify-between">
               <Label>Use Machine Learning Optimization</Label>
-              <Switch id="ml-optimization" defaultChecked disabled={isRunning} />
+              <Switch 
+                id="ml-optimization" 
+                checked={strategyParams.useMlOptimization}
+                onCheckedChange={(checked) => updateStrategyParams({ useMlOptimization: checked })} 
+                disabled={isRunning} 
+              />
             </div>
           </div>
         </div>

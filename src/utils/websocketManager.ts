@@ -1,4 +1,3 @@
-
 export interface WebSocketMessage {
   type: string;
   data: any;
@@ -18,6 +17,8 @@ export class WebSocketManager {
   private messageHandlers: ((message: WebSocketMessage) => void)[] = [];
   private url: string;
   private isConnecting = false;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private lastMessageTimestamp = 0;
 
   constructor(url: string) {
     this.url = url;
@@ -41,10 +42,13 @@ export class WebSocketManager {
           console.log('WebSocket connection established to', this.url);
           this.reconnectAttempts = 0;
           this.isConnecting = false;
+          this.startHeartbeat();
+          this.lastMessageTimestamp = Date.now();
           resolve();
         };
 
         this.socket.onmessage = (event) => {
+          this.lastMessageTimestamp = Date.now();
           try {
             // Kraken's WebSocket messages can be arrays or objects
             const rawData = JSON.parse(event.data);
@@ -84,6 +88,13 @@ export class WebSocketManager {
                   }
                 };
                 this.messageHandlers.forEach(handler => handler(message));
+              } else if (rawData.event === 'error') {
+                console.error('WebSocket error event:', rawData);
+                const message: WebSocketMessage = {
+                  type: 'error',
+                  data: rawData
+                };
+                this.messageHandlers.forEach(handler => handler(message));
               } else {
                 // Generic event
                 const message: WebSocketMessage = {
@@ -100,6 +111,7 @@ export class WebSocketManager {
 
         this.socket.onclose = (event) => {
           console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
+          this.stopHeartbeat();
           this.socket = null;
           this.isConnecting = false;
           this.attemptReconnect();
@@ -134,6 +146,50 @@ export class WebSocketManager {
     }, timeout);
   }
 
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    
+    // Send a ping every 30 seconds to keep the connection alive
+    this.heartbeatInterval = setInterval(() => {
+      if (this.isConnected()) {
+        // Check if we haven't received any message for more than 45 seconds
+        const currentTime = Date.now();
+        if (currentTime - this.lastMessageTimestamp > 45000) {
+          console.warn('No WebSocket messages received for 45+ seconds, reconnecting...');
+          this.reconnect();
+          return;
+        }
+        
+        // Send a ping message to Kraken
+        this.send({ op: 'ping' });
+      } else {
+        this.reconnect();
+      }
+    }, 30000);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
+  private reconnect() {
+    if (this.socket) {
+      try {
+        this.socket.close();
+      } catch (error) {
+        console.error('Error closing WebSocket during reconnect:', error);
+      }
+      this.socket = null;
+    }
+    
+    this.connect().catch(error => {
+      console.error('Reconnection failed:', error);
+    });
+  }
+
   subscribe(handler: (message: WebSocketMessage) => void): () => void {
     this.messageHandlers.push(handler);
     return () => {
@@ -157,9 +213,15 @@ export class WebSocketManager {
   }
 
   disconnect() {
+    this.stopHeartbeat();
     if (this.socket) {
-      this.socket.close();
-      this.socket = null;
+      try {
+        this.socket.close();
+        this.socket = null;
+      } catch (error) {
+        console.error('Error disconnecting WebSocket:', error);
+        this.socket = null;
+      }
     }
   }
 

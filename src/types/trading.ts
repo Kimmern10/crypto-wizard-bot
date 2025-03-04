@@ -7,6 +7,16 @@ export interface OrderParams {
   price?: string;
 }
 
+export interface StrategyParams {
+  riskLevel: number;
+  positionSize: number;
+  takeProfitEnabled: boolean;
+  stopLossEnabled: boolean;
+  takeProfitPercentage: number;
+  stopLossPercentage: number;
+  useMlOptimization: boolean;
+}
+
 export interface TradingContextType {
   apiKey: string;
   apiSecret: string;
@@ -27,4 +37,7 @@ export interface TradingContextType {
   lastTickerData: Record<string, any>;
   connectionStatus: string;
   lastConnectionEvent: string;
+  strategyParams: StrategyParams;
+  updateStrategyParams: (params: Partial<StrategyParams>) => void;
+  refreshData: () => Promise<void>;
 }
