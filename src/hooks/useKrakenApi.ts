@@ -447,19 +447,21 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       if (session.session && result.result && result.result.txid && Array.isArray(result.result.txid) && result.result.txid.length > 0) {
         try {
           const price = params.price || '0';
-          // Fix: The insert operation expects an array of objects or a single object, not an array with a single object
-          await supabase.from('trade_history').insert({
+          // Fix: Create a trade record that matches the trade_history table schema
+          const tradeRecord = {
             user_id: session.session.user.id,
             pair: params.pair,
             type: params.type,
-            price: price,
-            volume: params.volume,
-            cost: (parseFloat(price) * parseFloat(params.volume)).toString(),
-            fee: '0',
+            price: parseFloat(price),
+            volume: parseFloat(params.volume),
+            cost: parseFloat(price) * parseFloat(params.volume),
+            fee: 0,
             order_type: params.ordertype,
             external_id: result.result.txid[0],
             created_at: new Date().toISOString()
-          });
+          };
+          
+          await supabase.from('trade_history').insert(tradeRecord);
           console.log('Order saved to trade history');
         } catch (e) {
           console.error('Error saving order to trade history:', e);
