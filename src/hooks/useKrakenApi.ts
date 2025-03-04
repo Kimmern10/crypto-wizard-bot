@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import { getKrakenWebSocket, WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
@@ -308,20 +309,26 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       
       console.log('Trade history data:', tradesData);
       
-      // Process the trades data
-      const trades = Object.entries(tradesData.trades).map(([id, trade]: [string, any]) => ({
-        id,
-        pair: trade.pair,
-        type: trade.type,
-        price: parseFloat(trade.price),
-        volume: parseFloat(trade.vol),
-        time: new Date(trade.time * 1000).toISOString(),
-        orderType: trade.ordertype,
-        cost: parseFloat(trade.cost),
-        fee: parseFloat(trade.fee)
-      }));
-      
-      return trades;
+      // Process the trades data - add safety check for the trades property
+      if (tradesData && tradesData.result && tradesData.result.trades) {
+        const trades = Object.entries(tradesData.result.trades).map(([id, trade]: [string, any]) => ({
+          id,
+          pair: trade.pair,
+          type: trade.type,
+          price: parseFloat(trade.price),
+          volume: parseFloat(trade.vol),
+          time: new Date(trade.time * 1000).toISOString(),
+          orderType: trade.ordertype,
+          cost: parseFloat(trade.cost),
+          fee: parseFloat(trade.fee)
+        }));
+        
+        return trades;
+      } else {
+        // Return empty array when no trades exist or the property doesn't exist
+        console.log('No trade history found or unexpected response format');
+        return [];
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error('Failed to fetch trade history:', errorMessage);
