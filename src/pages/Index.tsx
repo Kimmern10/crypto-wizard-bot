@@ -7,6 +7,7 @@ import StrategyPanel from '@/components/StrategyPanel';
 import ApiKeyModal from '@/components/ApiKeyModal';
 import TradeHistory from '@/components/TradeHistory';
 import RiskManagement from '@/components/RiskManagement';
+import LogViewer from '@/components/LogViewer';
 
 const Index = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -49,6 +50,7 @@ const Index = () => {
             <div className="lg:col-span-2 space-y-6">
               <Dashboard />
               <TradeHistory />
+              <LogViewer />
             </div>
             
             <div className="space-y-6">

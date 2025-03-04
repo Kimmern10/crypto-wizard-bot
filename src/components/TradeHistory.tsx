@@ -3,8 +3,9 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTradingContext } from '@/hooks/useTradingContext';
-import { History, TrendingUp, TrendingDown } from 'lucide-react';
+import { History, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from "@/components/ui/button";
 
 const TradeHistory: React.FC = () => {
   const { tradeHistory, isConnected } = useTradingContext();
@@ -30,6 +31,13 @@ const TradeHistory: React.FC = () => {
             </CardTitle>
             <CardDescription>Recent trading activity</CardDescription>
           </div>
+          
+          {isConnected && (
+            <Button variant="outline" size="sm" className="flex items-center gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh</span>
+            </Button>
+          )}
         </div>
       </CardHeader>
       
@@ -75,12 +83,14 @@ const TradeHistory: React.FC = () => {
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
-              No trade history available
+              <p>No trade history available</p>
+              <p className="text-xs mt-2">Trades will appear here after you make transactions</p>
             </div>
           )
         ) : (
           <div className="text-center py-8 text-muted-foreground">
-            Connect your API to view trade history
+            <p>Connect your API to view trade history</p>
+            <p className="text-xs mt-2">Your trading history will be fetched from Kraken API</p>
           </div>
         )}
       </CardContent>

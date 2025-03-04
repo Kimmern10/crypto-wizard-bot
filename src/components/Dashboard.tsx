@@ -1,21 +1,29 @@
 
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Activity, DollarSign, BarChart, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Activity, DollarSign, BarChart, TrendingUp, TrendingDown, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { cn } from '@/lib/utils';
 import PerformanceChart from './PerformanceChart';
 
 const Dashboard: React.FC = () => {
-  const { currentBalance, activePositions, isConnected } = useTradingContext();
+  const { 
+    currentBalance, 
+    activePositions, 
+    isConnected, 
+    connectionStatus, 
+    lastConnectionEvent, 
+    lastTickerData 
+  } = useTradingContext();
 
-  // Calculate total balance value in USD (simplified)
+  // Calculate total balance value in USD from actual data
   const totalBalanceUSD = currentBalance.USD + 
-    (currentBalance.BTC * 36750) + 
-    (currentBalance.ETH * 2470);
+    (currentBalance.BTC * (lastTickerData['XBT/USD']?.c?.[0] || 36750)) + 
+    (currentBalance.ETH * (lastTickerData['ETH/USD']?.c?.[0] || 2470));
 
-  // Get a random value between -3 and 5 for daily change
-  const dailyChangePercent = Math.round((Math.random() * 8 - 3) * 10) / 10;
+  // Get a random value between -3 and 5 for daily change if we don't have real data
+  const dailyChangePercent = lastTickerData['XBT/USD']?.p?.[1] || 
+    (Math.round((Math.random() * 8 - 3) * 10) / 10);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -75,22 +83,30 @@ const Dashboard: React.FC = () => {
         <Card className="glass-card animation-delay-300 animate-slide-up">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">
-              Performance
+              API Connection
             </CardTitle>
-            <BarChart className="h-4 w-4 text-muted-foreground" />
+            {isConnected ? (
+              <Wifi className="h-4 w-4 text-green-600" />
+            ) : (
+              <WifiOff className="h-4 w-4 text-red-600" />
+            )}
           </CardHeader>
           <CardContent>
-            {isConnected ? (
-              <div>
-                <div className="text-2xl font-bold text-green-600">+5.2%</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Last 7 days
-                </p>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-2 text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-4 w-4" />
-                <span className="text-sm">Not connected</span>
+            <div className="text-sm font-medium">
+              {connectionStatus}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {lastConnectionEvent}
+            </p>
+            {Object.keys(lastTickerData).length > 0 && (
+              <div className="mt-2 border-t pt-2">
+                <p className="text-xs font-medium">Latest Ticker Data:</p>
+                {Object.keys(lastTickerData).map(pair => (
+                  <div key={pair} className="text-xs flex justify-between mt-1">
+                    <span>{pair}:</span>
+                    <span>${parseFloat(lastTickerData[pair]?.c?.[0] || '0').toLocaleString()}</span>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
@@ -100,6 +116,9 @@ const Dashboard: React.FC = () => {
       <Card className="glass-card">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-sm font-medium">Performance Overview</CardTitle>
+          <CardDescription className="text-xs">
+            {isConnected ? 'Live data' : 'Simulated data'}
+          </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <PerformanceChart />
