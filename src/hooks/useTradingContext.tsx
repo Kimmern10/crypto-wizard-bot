@@ -83,7 +83,10 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
           cleanup();
         }
         if (wsManager) {
-          wsManager.disconnect();
+          // Fix the error by safely checking if disconnect exists before calling it
+          if (wsManager.disconnect && typeof wsManager.disconnect === 'function') {
+            wsManager.disconnect();
+          }
         }
       };
     }

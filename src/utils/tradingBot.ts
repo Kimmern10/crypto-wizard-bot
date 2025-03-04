@@ -4,7 +4,7 @@ import { OrderParams } from '@/types/trading';
 
 declare global {
   interface Window {
-    botInterval: number | undefined;
+    botInterval: NodeJS.Timeout | undefined;
   }
 }
 
