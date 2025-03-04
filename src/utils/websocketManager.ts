@@ -1,3 +1,4 @@
+
 export interface WebSocketMessage {
   type: string;
   data: any;
@@ -19,12 +20,40 @@ export class WebSocketManager {
   private isConnecting = false;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private lastMessageTimestamp = 0;
+  private forceDemoMode = false;
 
   constructor(url: string) {
     this.url = url;
   }
 
+  setForceDemoMode(force: boolean): void {
+    this.forceDemoMode = force;
+    if (force) {
+      // If forcing demo mode, close any existing connection
+      this.disconnect();
+      // Notify subscribers about the mode change
+      this.notifySubscribers({
+        type: 'modeChange',
+        data: { isDemoMode: true, reason: 'CORS restrictions' }
+      });
+    }
+  }
+
+  isForceDemoMode(): boolean {
+    return this.forceDemoMode;
+  }
+
   connect(): Promise<void> {
+    // If we're in forced demo mode, don't actually try to connect
+    if (this.forceDemoMode) {
+      console.log('WebSocket in forced demo mode, not attempting real connection');
+      this.notifySubscribers({
+        type: 'connectionStatus',
+        data: { status: 'demoMode', message: 'Operating in demo mode' }
+      });
+      return Promise.resolve();
+    }
+
     if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
       return Promise.resolve();
     }
@@ -44,6 +73,12 @@ export class WebSocketManager {
           this.isConnecting = false;
           this.startHeartbeat();
           this.lastMessageTimestamp = Date.now();
+          
+          this.notifySubscribers({
+            type: 'connectionStatus',
+            data: { status: 'connected', message: 'Connected to Kraken WebSocket' }
+          });
+          
           resolve();
         };
 
@@ -114,12 +149,30 @@ export class WebSocketManager {
           this.stopHeartbeat();
           this.socket = null;
           this.isConnecting = false;
+          
+          this.notifySubscribers({
+            type: 'connectionStatus',
+            data: { 
+              status: 'disconnected', 
+              message: `Connection closed: ${event.code} ${event.reason}` 
+            }
+          });
+          
           this.attemptReconnect();
         };
 
         this.socket.onerror = (error) => {
           console.error('WebSocket error:', error);
           this.isConnecting = false;
+          
+          this.notifySubscribers({
+            type: 'connectionStatus',
+            data: { 
+              status: 'error', 
+              message: 'WebSocket connection error' 
+            }
+          });
+          
           reject(error);
         };
       } catch (error) {
@@ -129,14 +182,40 @@ export class WebSocketManager {
     });
   }
 
+  private notifySubscribers(message: WebSocketMessage): void {
+    this.messageHandlers.forEach(handler => handler(message));
+  }
+
   private attemptReconnect() {
+    if (this.forceDemoMode) {
+      console.log('In demo mode, not attempting reconnection');
+      return;
+    }
+    
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('Maximum reconnection attempts reached');
+      
+      this.notifySubscribers({
+        type: 'connectionStatus',
+        data: { 
+          status: 'failed', 
+          message: 'Maximum reconnection attempts reached' 
+        }
+      });
+      
       return;
     }
 
     const timeout = this.reconnectTimeout * Math.pow(1.5, this.reconnectAttempts);
     console.log(`Attempting to reconnect in ${timeout}ms...`);
+    
+    this.notifySubscribers({
+      type: 'connectionStatus',
+      data: { 
+        status: 'reconnecting', 
+        message: `Reconnecting in ${Math.round(timeout/1000)}s (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})` 
+      }
+    });
 
     setTimeout(() => {
       this.reconnectAttempts++;
@@ -176,6 +255,10 @@ export class WebSocketManager {
   }
 
   private reconnect() {
+    if (this.forceDemoMode) {
+      return;
+    }
+    
     if (this.socket) {
       try {
         this.socket.close();
@@ -198,6 +281,11 @@ export class WebSocketManager {
   }
 
   send(message: any): boolean {
+    if (this.forceDemoMode) {
+      console.log('In demo mode, not sending actual message:', message);
+      return true;
+    }
+    
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       console.error('Cannot send message: WebSocket is not open');
       return false;
@@ -226,6 +314,9 @@ export class WebSocketManager {
   }
 
   isConnected(): boolean {
+    if (this.forceDemoMode) {
+      return true; // Always report as connected in demo mode
+    }
     return this.socket !== null && this.socket.readyState === WebSocket.OPEN;
   }
 }

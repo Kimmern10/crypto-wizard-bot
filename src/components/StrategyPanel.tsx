@@ -7,7 +7,19 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useTradingContext } from '@/hooks/useTradingContext';
-import { Play, Square, Sliders, ChevronsUpDown, Brain, TrendingUp, ArrowDownUp, BadgeAlert, RefreshCw } from 'lucide-react';
+import { 
+  Play, 
+  Square, 
+  Sliders, 
+  ChevronsUpDown, 
+  Brain, 
+  TrendingUp, 
+  ArrowDownUp, 
+  BadgeAlert, 
+  RefreshCw,
+  ServerCrash
+} from 'lucide-react';
+import { toast } from 'sonner';
 
 const strategyOptions = [
   {
@@ -49,10 +61,13 @@ const StrategyPanel: React.FC = () => {
     isConnected,
     strategyParams,
     updateStrategyParams,
-    refreshData
+    refreshData,
+    connectionStatus
   } = useTradingContext();
   
   const selectedStrategyDetails = strategyOptions.find(strategy => strategy.id === selectedStrategy);
+  const isDemoMode = connectionStatus.toLowerCase().includes('demo') || 
+                    connectionStatus.toLowerCase().includes('cors');
 
   const handleRiskLevelChange = (value: number[]) => {
     updateStrategyParams({ riskLevel: value[0] });
@@ -64,6 +79,18 @@ const StrategyPanel: React.FC = () => {
 
   const handleRefreshData = () => {
     refreshData();
+    toast.success('Data refreshed');
+  };
+
+  const handleRunButtonClick = () => {
+    if (isDemoMode && !isRunning) {
+      toast.info('Starting trading bot in demo mode', {
+        description: 'Orders will be simulated and no real trades will be executed',
+        duration: 5000
+      });
+    }
+    
+    toggleRunning();
   };
 
   return (
@@ -79,6 +106,13 @@ const StrategyPanel: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-2">
+            {isDemoMode && (
+              <span className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <ServerCrash className="h-3 w-3" />
+                Demo Mode
+              </span>
+            )}
+            
             <Button
               variant="outline"
               size="icon"
@@ -93,7 +127,7 @@ const StrategyPanel: React.FC = () => {
             <Button
               variant={isRunning ? "destructive" : "default"}
               size="sm"
-              onClick={toggleRunning}
+              onClick={handleRunButtonClick}
               disabled={!isConnected}
               className="flex items-center gap-1"
             >

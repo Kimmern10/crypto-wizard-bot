@@ -9,13 +9,84 @@ export const setupWebSocket = (
   setLastTickerData: (updateFn: (prev: Record<string, any>) => Record<string, any>) => void
 ) => {
   // Log connecting status
-  setConnectionStatus('Connecting to Kraken WebSocket...');
-  console.log('Attempting to connect to Kraken WebSocket...');
+  setConnectionStatus('Checking connection method...');
+  console.log('Determining best connection method for Kraken...');
   
-  // Track reconnection attempts for UI feedback
-  let reconnectCount = 0;
+  // Check if the browser can make cross-origin requests to Kraken API
+  checkCorsRestrictions()
+    .then(hasCorsRestrictions => {
+      if (hasCorsRestrictions) {
+        console.log('CORS restrictions detected, enabling demo mode');
+        setConnectionStatus('CORS restrictions detected');
+        setLastConnectionEvent(`CORS check at ${new Date().toLocaleTimeString()}`);
+        
+        // Notify user about the CORS issue
+        toast.error('Cannot connect directly to Kraken due to CORS restrictions', {
+          description: 'A proxy server would be needed for direct connection in production.',
+          duration: 6000,
+        });
+        
+        // Set demo mode
+        wsManager.setForceDemoMode(true);
+        
+        // Start demo data generation
+        const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+        
+        // Return cleanup function
+        return () => {
+          cleanupDemoData();
+          wsManager.disconnect();
+        };
+      } else {
+        // No CORS restrictions, try normal WebSocket connection
+        return connectAndSubscribe();
+      }
+    })
+    .catch(error => {
+      console.error('Error checking CORS restrictions:', error);
+      setConnectionStatus('Connection check failed');
+      
+      // Fallback to demo mode
+      wsManager.setForceDemoMode(true);
+      const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+      
+      return () => {
+        cleanupDemoData();
+        wsManager.disconnect();
+      };
+    });
+  
+  // Function to check if there are CORS restrictions
+  async function checkCorsRestrictions(): Promise<boolean> {
+    try {
+      console.log('Testing CORS restrictions with Kraken API...');
+      
+      // Try to make a simple GET request to Kraken public API
+      const response = await fetch('https://api.kraken.com/0/public/Time', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // Do not use no-cors mode so we can detect CORS errors
+      });
+      
+      // If we get here without error, CORS is allowed
+      console.log('CORS check successful:', response.status);
+      return false;
+    } catch (error) {
+      // If we get an error, it's likely due to CORS restrictions
+      console.error('CORS check failed:', error);
+      return true;
+    }
+  }
   
   const connectAndSubscribe = () => {
+    // Track reconnection attempts for UI feedback
+    let reconnectCount = 0;
+    
+    setConnectionStatus('Connecting to Kraken WebSocket...');
+    console.log('Attempting to connect to Kraken WebSocket...');
+    
     wsManager.connect()
       .then(() => {
         setConnectionStatus('Connected to WebSocket');
@@ -51,54 +122,6 @@ export const setupWebSocket = (
             }
           }, index * 300); // 300ms delay between subscriptions
         });
-        
-        // For demo purposes, let's simulate some ticker data if none is received after a timeout
-        let hasReceivedData = false;
-        
-        setTimeout(() => {
-          if (!hasReceivedData && wsManager.isConnected()) {
-            console.log('No real ticker data received yet, simulating demo data...');
-            
-            // Simulate ticker data for demonstration
-            simulateDemoTickerData(setLastTickerData);
-          }
-        }, 5000);
-        
-        // Register handler for incoming messages
-        const unsubscribe = wsManager.subscribe((message: WebSocketMessage) => {
-          try {
-            if (message.type === 'ticker') {
-              // Update ticker data in state
-              setLastTickerData(prev => ({
-                ...prev,
-                [message.data.pair]: {
-                  ...message.data,
-                  timestamp: new Date().toISOString()
-                }
-              }));
-              
-              hasReceivedData = true;
-              console.log(`Received ticker data for ${message.data.pair}`);
-            } else if (message.type === 'systemStatus') {
-              console.log('Received system status:', message.data);
-              setConnectionStatus(`System Status: ${message.data.status}`);
-              setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
-            } else if (message.type === 'heartbeat') {
-              console.log('Received heartbeat');
-            } else if (message.type === 'error') {
-              console.error('WebSocket error message:', message.data);
-              setConnectionStatus(`Error: ${message.data.errorMessage || 'Unknown error'}`);
-              setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
-              toast.error(`WebSocket error: ${message.data.errorMessage || 'Unknown error'}`);
-            } else {
-              console.log('Received other message type:', message.type, message.data);
-            }
-          } catch (error) {
-            console.error('Error processing WebSocket message:', error);
-          }
-        });
-        
-        return unsubscribe;
       })
       .catch(error => {
         reconnectCount++;
@@ -110,17 +133,50 @@ export const setupWebSocket = (
         if (reconnectCount === 1 || reconnectCount % 3 === 0) {
           toast.error('Failed to connect to Kraken WebSocket');
         }
-        
-        // After several failed attempts, simulate ticker data for demo purposes
-        if (reconnectCount >= 3) {
-          console.log('Multiple connection attempts failed, simulating demo data...');
-          setConnectionStatus('Demo Mode (Connection failed)');
-          simulateDemoTickerData(setLastTickerData);
-        }
-        
-        // Attempt to reconnect after a delay
-        setTimeout(connectAndSubscribe, 5000);
       });
+    
+    // Register handler for incoming messages
+    const unsubscribe = wsManager.subscribe((message: WebSocketMessage) => {
+      try {
+        if (message.type === 'ticker') {
+          // Update ticker data in state
+          setLastTickerData(prev => ({
+            ...prev,
+            [message.data.pair]: {
+              ...message.data,
+              timestamp: new Date().toISOString()
+            }
+          }));
+          
+          console.log(`Received ticker data for ${message.data.pair}`);
+        } else if (message.type === 'systemStatus') {
+          console.log('Received system status:', message.data);
+          setConnectionStatus(`System Status: ${message.data.status}`);
+          setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
+        } else if (message.type === 'heartbeat') {
+          console.log('Received heartbeat');
+        } else if (message.type === 'error') {
+          console.error('WebSocket error message:', message.data);
+          setConnectionStatus(`Error: ${message.data.errorMessage || 'Unknown error'}`);
+          setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
+          toast.error(`WebSocket error: ${message.data.errorMessage || 'Unknown error'}`);
+        } else if (message.type === 'connectionStatus') {
+          console.log('Connection status change:', message.data);
+          setConnectionStatus(message.data.message || message.data.status);
+          setLastConnectionEvent(`Status change at ${new Date().toLocaleTimeString()}`);
+        } else if (message.type === 'modeChange') {
+          console.log('Mode change:', message.data);
+          setConnectionStatus(`Demo Mode (${message.data.reason})`);
+          setLastConnectionEvent(`Mode change at ${new Date().toLocaleTimeString()}`);
+        } else {
+          console.log('Received other message type:', message.type, message.data);
+        }
+      } catch (error) {
+        console.error('Error processing WebSocket message:', error);
+      }
+    });
+    
+    return unsubscribe;
   };
   
   // Function to simulate ticker data for demo purposes
@@ -207,9 +263,6 @@ export const setupWebSocket = (
     
     return () => clearInterval(updateInterval);
   };
-  
-  // Start initial connection
-  connectAndSubscribe();
   
   // Return a cleanup function
   return () => {

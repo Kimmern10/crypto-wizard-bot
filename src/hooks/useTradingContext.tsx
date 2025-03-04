@@ -149,9 +149,20 @@ export const TradingProvider: React.FC<TradingProviderProps> = ({ children }) =>
   const toggleRunning = () => {
     if (!isRunning && isConnected) {
       setIsRunning(true);
-      toast.success('Trading bot started');
+      
+      const isDemoMode = connectionStatus.toLowerCase().includes('demo') || 
+                         connectionStatus.toLowerCase().includes('cors');
+      
+      if (isDemoMode) {
+        toast.success('Trading bot started in demo mode', {
+          description: 'No actual trades will be executed'
+        });
+      } else {
+        toast.success('Trading bot started');
+      }
+      
       startTradingBot(
-        true,
+        isDemoMode, // Pass demo mode status to the bot
         selectedStrategy,
         krakenApi.sendOrder,
         krakenApi.fetchBalance,

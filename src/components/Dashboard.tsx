@@ -1,10 +1,24 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Activity, DollarSign, BarChart, TrendingUp, TrendingDown, AlertTriangle, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { 
+  Activity, 
+  DollarSign, 
+  BarChart, 
+  TrendingUp, 
+  TrendingDown, 
+  AlertTriangle, 
+  Wifi, 
+  WifiOff, 
+  AlertCircle,
+  ServerCrash,
+  Server
+} from 'lucide-react';
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { cn } from '@/lib/utils';
 import PerformanceChart from './PerformanceChart';
+import { Button } from "./ui/button";
+import { toast } from "sonner";
 
 const Dashboard: React.FC = () => {
   const { 
@@ -20,6 +34,8 @@ const Dashboard: React.FC = () => {
   } = useTradingContext();
   
   const [isDemo, setIsDemo] = useState(false);
+  const [corsBlocked, setCorsBlocked] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Calculate total balance value in USD from actual data
   const totalBalanceUSD = currentBalance.USD + 
@@ -36,15 +52,20 @@ const Dashboard: React.FC = () => {
       console.log('Received ticker data for pairs:', Object.keys(lastTickerData).join(', '));
       
       // If we have ticker data and connectionStatus contains "Demo", mark as demo
-      if (connectionStatus.includes('Demo')) {
+      if (connectionStatus.toLowerCase().includes('demo')) {
         setIsDemo(true);
       }
     }
     
-    // If the current error status includes CORS, we're likely in demo mode
+    // Check for CORS issues in the connection status
+    if (connectionStatus.toLowerCase().includes('cors')) {
+      setCorsBlocked(true);
+      setIsDemo(true);
+    }
+    
+    // If the current status indicates failure or error, we might be in demo mode
     if (connectionStatus.toLowerCase().includes('failed') || 
-        connectionStatus.toLowerCase().includes('error') ||
-        connectionStatus.toLowerCase().includes('cors')) {
+        connectionStatus.toLowerCase().includes('error')) {
       setIsDemo(true);
     }
   }, [lastTickerData, connectionStatus]);
@@ -68,21 +89,54 @@ const Dashboard: React.FC = () => {
   // Handle refresh button click
   const handleRefresh = () => {
     console.log('Manually refreshing data...');
-    refreshData();
+    setRefreshing(true);
+    
+    refreshData()
+      .then(() => {
+        toast.success('Data refreshed successfully');
+      })
+      .catch((error) => {
+        console.error('Error refreshing data:', error);
+        toast.error('Failed to refresh data');
+      })
+      .finally(() => {
+        setRefreshing(false);
+      });
+  };
+
+  // Function to show the technical details of CORS issues
+  const handleShowTechnicalDetails = () => {
+    toast.info('CORS Restriction Details', {
+      description: `
+        The browser prevents direct API calls to Kraken for security reasons.
+        In production, this would require a proxy server to handle API requests.
+      `,
+      duration: 6000,
+    });
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {isDemo && (
+      {corsBlocked && (
         <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
-          <CardContent className="p-4 flex items-center space-x-3">
-            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          <CardContent className="p-4 flex items-start space-x-3">
+            <ServerCrash className="h-5 w-5 mt-1 flex-shrink-0 text-amber-600 dark:text-amber-400" />
             <div>
-              <h3 className="font-medium text-amber-800 dark:text-amber-300">Demo Mode Active</h3>
-              <p className="text-sm text-amber-700 dark:text-amber-400">
-                Due to CORS restrictions, this demo is running with simulated data. In a production environment, 
-                you would need a backend proxy to connect to Kraken's API.
+              <h3 className="font-medium text-amber-800 dark:text-amber-300">CORS Restrictions Detected</h3>
+              <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                Your browser is preventing direct API calls to Kraken as a security measure. 
+                In a production environment, you would need to implement a backend proxy to route these requests.
               </p>
+              <div className="mt-3 flex items-center gap-3">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleShowTechnicalDetails}
+                  className="text-amber-800 border-amber-300 hover:bg-amber-100 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-900/40"
+                >
+                  View Technical Details
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -148,7 +202,10 @@ const Dashboard: React.FC = () => {
             </CardTitle>
             {isConnected ? (
               isDemo ? (
-                <Wifi className="h-4 w-4 text-amber-500" />
+                <div className="flex items-center space-x-1">
+                  <span className="text-xs text-amber-500">Demo</span>
+                  <Server className="h-4 w-4 text-amber-500" />
+                </div>
               ) : (
                 <Wifi className="h-4 w-4 text-green-600" />
               )
@@ -158,7 +215,7 @@ const Dashboard: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="text-sm font-medium">
-              {isDemo ? 'Demo Mode' : connectionStatus}
+              {connectionStatus}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               {lastConnectionEvent || 'No connection events yet'}
@@ -166,24 +223,38 @@ const Dashboard: React.FC = () => {
             {Object.keys(lastTickerData).length > 0 ? (
               <div className="mt-2 border-t pt-2">
                 <p className="text-xs font-medium">Latest Ticker Data:</p>
-                {Object.keys(lastTickerData).map(pair => (
+                {Object.keys(lastTickerData).slice(0, 3).map(pair => (
                   <div key={pair} className="text-xs flex justify-between mt-1">
                     <span>{pair}:</span>
-                    <span>${parseFloat(lastTickerData[pair]?.c?.[0] || '0').toLocaleString()}</span>
+                    <span className={cn(
+                      parseFloat(lastTickerData[pair]?.c?.[0]) > parseFloat(lastTickerData[pair]?.o?.[0])
+                        ? "text-green-600"
+                        : "text-red-600"
+                    )}>
+                      ${parseFloat(lastTickerData[pair]?.c?.[0] || '0').toLocaleString()}
+                    </span>
                   </div>
                 ))}
+                {Object.keys(lastTickerData).length > 3 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    +{Object.keys(lastTickerData).length - 3} more pairs
+                  </p>
+                )}
               </div>
             ) : (
               <div className="mt-2 text-xs text-muted-foreground">
                 Waiting for ticker data...
               </div>
             )}
-            <button 
+            <Button 
               onClick={handleRefresh}
-              className="mt-3 text-xs text-primary hover:underline"
+              className="mt-3 w-full text-xs py-1 h-auto"
+              variant="outline"
+              size="sm"
+              disabled={refreshing}
             >
-              Manually refresh data
-            </button>
+              {refreshing ? 'Refreshing...' : 'Manually refresh data'}
+            </Button>
           </CardContent>
         </Card>
       </div>
