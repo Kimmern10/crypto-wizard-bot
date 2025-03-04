@@ -53,6 +53,13 @@ interface KrakenTradesResponse {
   };
 }
 
+interface KrakenOrderResponse {
+  result: {
+    descr: { order: string };
+    txid: string[];
+  };
+}
+
 export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -184,7 +191,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
             try {
               for (const trade of trades) {
                 await supabase.from('trade_history').upsert({
-                  user_id: session.session?.user.id,
+                  user_id: session.session!.user.id,
                   pair: trade.pair,
                   type: trade.type,
                   price: trade.price,
@@ -368,10 +375,10 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
                 user_id: session.session.user.id,
                 pair: trade.pair,
                 type: trade.type,
-                price: trade.price.toString(),
-                volume: trade.volume.toString(),
-                cost: trade.cost.toString(),
-                fee: trade.fee.toString(),
+                price: trade.price,
+                volume: trade.volume,
+                cost: trade.cost,
+                fee: trade.fee,
                 order_type: trade.orderType,
                 external_id: trade.id,
                 created_at: trade.time
@@ -421,7 +428,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
         Object.assign(orderData, { price: params.price });
       }
       
-      const result = await krakenRequest('private/AddOrder', true, 'POST', orderData);
+      const result = await krakenRequest<KrakenOrderResponse>('private/AddOrder', true, 'POST', orderData);
       
       console.log('Order placed successfully:', result);
       
@@ -431,12 +438,12 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
         toast.success(`${params.type.toUpperCase()} order for ${params.volume} ${params.pair} placed successfully`);
       }
       
-      if (!result || typeof result !== 'object' || !('result' in result)) {
+      if (!result || typeof result !== 'object') {
         throw new Error('Invalid response format from Kraken API');
       }
       
       const { data: session } = await supabase.auth.getSession();
-      if (session.session && result.result && result.result.txid) {
+      if (session.session && result.result && Array.isArray(result.result.txid) && result.result.txid.length > 0) {
         try {
           const price = params.price || '0';
           await supabase.from('trade_history').insert({
