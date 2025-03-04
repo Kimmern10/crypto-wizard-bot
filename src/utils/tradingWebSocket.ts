@@ -10,6 +10,7 @@ export const setupWebSocket = (
 ) => {
   // Log connecting status
   setConnectionStatus('Connecting to Kraken WebSocket...');
+  console.log('Attempting to connect to Kraken WebSocket...');
   
   // Track reconnection attempts for UI feedback
   let reconnectCount = 0;
@@ -19,6 +20,7 @@ export const setupWebSocket = (
       .then(() => {
         setConnectionStatus('Connected to WebSocket');
         setLastConnectionEvent(`Connected at ${new Date().toLocaleTimeString()}`);
+        console.log('Successfully connected to Kraken WebSocket');
         
         // Only show toast on initial connection or after multiple reconnects
         if (reconnectCount === 0 || reconnectCount > 2) {
@@ -44,6 +46,8 @@ export const setupWebSocket = (
                   pair: [pair]
                 }
               });
+            } else {
+              console.warn(`Cannot subscribe to ${pair}: WebSocket not connected`);
             }
           }, index * 300); // 300ms delay between subscriptions
         });
@@ -60,14 +64,21 @@ export const setupWebSocket = (
                   timestamp: new Date().toISOString()
                 }
               }));
+              
+              console.log(`Received ticker data for ${message.data.pair}`);
             } else if (message.type === 'systemStatus') {
+              console.log('Received system status:', message.data);
               setConnectionStatus(`System Status: ${message.data.status}`);
               setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
+            } else if (message.type === 'heartbeat') {
+              console.log('Received heartbeat');
             } else if (message.type === 'error') {
               console.error('WebSocket error message:', message.data);
               setConnectionStatus(`Error: ${message.data.errorMessage || 'Unknown error'}`);
               setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
               toast.error(`WebSocket error: ${message.data.errorMessage || 'Unknown error'}`);
+            } else {
+              console.log('Received other message type:', message.type, message.data);
             }
           } catch (error) {
             console.error('Error processing WebSocket message:', error);

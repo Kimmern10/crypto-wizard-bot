@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Activity, DollarSign, BarChart, TrendingUp, TrendingDown, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
 import { useTradingContext } from '@/hooks/useTradingContext';
@@ -13,7 +13,10 @@ const Dashboard: React.FC = () => {
     isConnected, 
     connectionStatus, 
     lastConnectionEvent, 
-    lastTickerData 
+    lastTickerData,
+    apiKey,
+    isApiConfigured,
+    refreshData
   } = useTradingContext();
 
   // Calculate total balance value in USD from actual data
@@ -24,6 +27,35 @@ const Dashboard: React.FC = () => {
   // Get a random value between -3 and 5 for daily change if we don't have real data
   const dailyChangePercent = lastTickerData['XBT/USD']?.p?.[1] || 
     (Math.round((Math.random() * 8 - 3) * 10) / 10);
+  
+  // Debug connection status
+  useEffect(() => {
+    if (isConnected) {
+      console.log('Dashboard detected connection status: Connected');
+    } else {
+      console.log('Dashboard detected connection status: Disconnected');
+    }
+    
+    console.log('API configuration status:', isApiConfigured ? 'Configured' : 'Not configured');
+    console.log('Current connection status:', connectionStatus);
+    
+    if (isApiConfigured && apiKey) {
+      console.log('API key is present, first 4 characters:', apiKey.substring(0, 4) + '...');
+    }
+  }, [isConnected, isApiConfigured, connectionStatus, apiKey]);
+
+  // Log ticker data changes
+  useEffect(() => {
+    if (Object.keys(lastTickerData).length > 0) {
+      console.log('Received ticker data for pairs:', Object.keys(lastTickerData).join(', '));
+    }
+  }, [lastTickerData]);
+
+  // Handle refresh button click
+  const handleRefresh = () => {
+    console.log('Manually refreshing data...');
+    refreshData();
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -96,9 +128,9 @@ const Dashboard: React.FC = () => {
               {connectionStatus}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {lastConnectionEvent}
+              {lastConnectionEvent || 'No connection events yet'}
             </p>
-            {Object.keys(lastTickerData).length > 0 && (
+            {Object.keys(lastTickerData).length > 0 ? (
               <div className="mt-2 border-t pt-2">
                 <p className="text-xs font-medium">Latest Ticker Data:</p>
                 {Object.keys(lastTickerData).map(pair => (
@@ -108,7 +140,17 @@ const Dashboard: React.FC = () => {
                   </div>
                 ))}
               </div>
+            ) : (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Waiting for ticker data...
+              </div>
             )}
+            <button 
+              onClick={handleRefresh}
+              className="mt-3 text-xs text-primary hover:underline"
+            >
+              Manually refresh data
+            </button>
           </CardContent>
         </Card>
       </div>
