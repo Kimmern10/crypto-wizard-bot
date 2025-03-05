@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
+import { WifiOff, Wifi, RefreshCw, ServerCrash } from 'lucide-react';
 
 interface ChartStatusProps {
   subscriptionStatus: string;
@@ -29,7 +29,8 @@ const ChartStatus: React.FC<ChartStatusProps> = ({
   // Function to get appropriate status icon
   const StatusIcon = () => {
     if (!isConnected && !isDemoMode) return <WifiOff className="h-3 w-3 mr-1" />;
-    if (subscriptionStatus === 'active' || isDemoMode) return <Wifi className="h-3 w-3 mr-1" />;
+    if (isDemoMode) return <ServerCrash className="h-3 w-3 mr-1" />;
+    if (subscriptionStatus === 'active') return <Wifi className="h-3 w-3 mr-1" />;
     if (subscriptionStatus === 'subscribing' || subscriptionStatus === 'resubscribing') 
       return <RefreshCw className="h-3 w-3 mr-1 animate-spin" />;
     
@@ -45,7 +46,7 @@ const ChartStatus: React.FC<ChartStatusProps> = ({
     if (subscriptionStatus === 'subscribing') return "Connecting...";
     if (subscriptionStatus === 'resubscribing') return "Updating connection...";
     
-    return "Unknown status";
+    return subscriptionStatus || "Unknown status";
   };
 
   return (

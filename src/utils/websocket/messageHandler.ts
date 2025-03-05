@@ -7,9 +7,9 @@ import { toast } from 'sonner';
  */
 export const handleWebSocketMessage = (
   message: WebSocketMessage,
-  setConnectionStatus: (status: string) => void,
+  setSubscriptionStatus: (status: string) => void,
   setLastConnectionEvent: (event: string) => void,
-  setLastTickerData: (updateFn: (prev: Record<string, any>) => Record<string, any>) => void
+  updateChartData?: (updateFn: (prev: any) => any) => void
 ): void => {
   try {
     if (message.type === 'ticker') {
@@ -19,19 +19,15 @@ export const handleWebSocketMessage = (
         return;
       }
       
-      // Update ticker data in state
-      setLastTickerData(prev => ({
-        ...prev,
-        [message.data.pair]: {
-          ...message.data,
-          timestamp: new Date().toISOString()
-        }
-      }));
+      // Call the chart data update function if provided
+      if (updateChartData) {
+        updateChartData((prev) => prev);
+      }
       
       console.log(`Received ticker data for ${message.data.pair}`);
     } else if (message.type === 'systemStatus') {
       console.log('Received system status:', message.data);
-      setConnectionStatus(`System Status: ${message.data.status}`);
+      setSubscriptionStatus(`System Status: ${message.data.status}`);
       setLastConnectionEvent(`Status update at ${new Date().toLocaleTimeString()}`);
     } else if (message.type === 'heartbeat') {
       console.log('Received heartbeat');
@@ -40,16 +36,16 @@ export const handleWebSocketMessage = (
       setLastConnectionEvent(`Heartbeat at ${new Date().toLocaleTimeString()}`);
     } else if (message.type === 'error') {
       console.error('WebSocket error message:', message.data);
-      setConnectionStatus(`Error: ${message.data.errorMessage || 'Unknown error'}`);
+      setSubscriptionStatus(`Error: ${message.data.errorMessage || 'Unknown error'}`);
       setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
       toast.error(`WebSocket error: ${message.data.errorMessage || 'Unknown error'}`);
     } else if (message.type === 'connectionStatus') {
       console.log('Connection status change:', message.data);
-      setConnectionStatus(message.data.message || message.data.status);
+      setSubscriptionStatus(message.data.message || message.data.status);
       setLastConnectionEvent(`Status change at ${new Date().toLocaleTimeString()}`);
     } else if (message.type === 'modeChange') {
       console.log('Mode change:', message.data);
-      setConnectionStatus(`Demo Mode (${message.data.reason})`);
+      setSubscriptionStatus(`Demo Mode (${message.data.reason})`);
       setLastConnectionEvent(`Mode change at ${new Date().toLocaleTimeString()}`);
     } else if (message.type === 'subscriptionStatus') {
       console.log('Subscription status:', message.data);

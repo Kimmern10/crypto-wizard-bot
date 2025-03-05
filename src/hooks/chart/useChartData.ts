@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { PriceDataPoint, ChartState } from '@/components/chart/types';
 import { useTradingContext } from '@/hooks/useTradingContext';
-import { getKrakenWebSocket, getConnectionStatus, type WebSocketMessage } from '@/utils/websocketManager';
+import { getKrakenWebSocket, getConnectionStatus } from '@/utils/websocketManager';
 import { toast } from 'sonner';
 import { generateDemoData, updateChartWithTickerData, updateChartForTimeRange } from '@/components/chart/chartUtils';
 import { handleWebSocketMessage } from '@/utils/websocket/messageHandler';
@@ -31,7 +31,7 @@ export function useChartData(): UseChartDataReturn {
   const { isConnected, lastTickerData, connectionStatus, restartConnection } = useTradingContext();
   
   const [selectedPair, setSelectedPair] = useState<string>('XBT/USD');
-  const [availablePairs, setAvailablePairs] = useState<string[]>(defaultPairs);
+  const [availablePairs] = useState<string[]>(defaultPairs);
   const [activeTimeRange, setActiveTimeRange] = useState<string>(initialTimeRanges[1]);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('initializing');
   const [refreshingChart, setRefreshingChart] = useState<boolean>(false);
@@ -59,9 +59,25 @@ export function useChartData(): UseChartDataReturn {
     dataByTimeRange: initialTimeRanges.reduce((acc, range) => ({...acc, [range]: []}), {})
   });
   
+  const wsSubscriptionRef = useRef<(() => void) | null>(null);
+  const currentPairRef = useRef<string>(selectedPair);
+  
+  // Update the ref when selectedPair changes
+  useEffect(() => {
+    currentPairRef.current = selectedPair;
+  }, [selectedPair]);
+  
   // Set up WebSocket subscription when selected pair changes
   useEffect(() => {
+    console.log(`Setting up chart data for ${selectedPair}`);
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    // Clean up previous subscription if exists
+    if (wsSubscriptionRef.current) {
+      console.log(`Cleaning up previous subscription for ${currentPairRef.current}`);
+      wsSubscriptionRef.current();
+      wsSubscriptionRef.current = null;
+    }
     
     if (!wsConnected && !isDemoMode) {
       console.log('No WebSocket connection, generating demo data');
@@ -76,15 +92,15 @@ export function useChartData(): UseChartDataReturn {
     const wsManager = getKrakenWebSocket();
     
     // Handler for all WebSocket messages
-    const handleTickerUpdate = (message: WebSocketMessage) => {
+    const handleTickerUpdate = (message: any) => {
       // Use the centralized message handler
       handleWebSocketMessage(
         message, 
         setSubscriptionStatus,
         setLastConnectionEvent,
         (updateFn) => {
-          if (message.type === 'ticker' && message.data.pair === selectedPair) {
-            updateChartWithTickerData(message.data, selectedPair, activeTimeRange, dataCollectionRef, setChartState);
+          if (message.type === 'ticker' && message.data?.pair === currentPairRef.current) {
+            updateChartWithTickerData(message.data, currentPairRef.current, activeTimeRange, dataCollectionRef, setChartState);
             setSubscriptionStatus('active');
           }
         }
@@ -92,7 +108,7 @@ export function useChartData(): UseChartDataReturn {
     };
     
     // Subscribe to WebSocket messages
-    const unsubscribe = wsManager.subscribe(handleTickerUpdate);
+    wsSubscriptionRef.current = wsManager.subscribe(handleTickerUpdate);
     
     // Request subscription to the selected pair
     wsManager.send({
@@ -113,7 +129,11 @@ export function useChartData(): UseChartDataReturn {
     
     // Cleanup: unsubscribe from messages and ticker
     return () => {
-      unsubscribe();
+      if (wsSubscriptionRef.current) {
+        wsSubscriptionRef.current();
+        wsSubscriptionRef.current = null;
+      }
+      
       wsManager.send({
         event: "unsubscribe",
         pair: [selectedPair],
@@ -122,7 +142,7 @@ export function useChartData(): UseChartDataReturn {
         }
       });
     };
-  }, [isConnected, selectedPair, lastTickerData, activeTimeRange]);
+  }, [selectedPair, activeTimeRange]);
   
   // Update chart when time range changes
   useEffect(() => {
