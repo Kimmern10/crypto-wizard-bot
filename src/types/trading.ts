@@ -40,4 +40,39 @@ export interface TradingContextType {
   strategyParams: StrategyParams;
   updateStrategyParams: (params: Partial<StrategyParams>) => void;
   refreshData: () => Promise<void>;
+  availableStrategies: {
+    id: string;
+    name: string;
+    description: string;
+    riskLevel: string;
+  }[];
+  dryRunMode: boolean;
+  toggleDryRunMode: () => void;
+}
+
+export interface TradePosition {
+  id: string;
+  pair: string;
+  type: 'buy' | 'sell';
+  entryPrice: number;
+  currentPrice: number;
+  volume: number;
+  pnl: number;
+  pnlPercentage: number;
+  openTime: string;
+  stopLoss: number | null;
+  takeProfit: number | null;
+}
+
+export interface HistoricalTrade {
+  id: string;
+  pair: string;
+  type: 'buy' | 'sell';
+  price: number;
+  volume: number;
+  cost: number;
+  fee: number;
+  time: string;
+  profit?: number;
+  profitPercentage?: number;
 }

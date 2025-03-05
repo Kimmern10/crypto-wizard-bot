@@ -17,40 +17,10 @@ import {
   ArrowDownUp, 
   BadgeAlert, 
   RefreshCw,
-  ServerCrash
+  ServerCrash,
+  FlaskConical
 } from 'lucide-react';
 import { toast } from 'sonner';
-
-const strategyOptions = [
-  {
-    id: 'trend_following',
-    name: 'Trend Following',
-    description: 'Follow the market trend and enter trades in the direction of the trend',
-    icon: TrendingUp,
-    riskLevel: 'Medium'
-  },
-  {
-    id: 'mean_reversion',
-    name: 'Mean Reversion',
-    description: 'Enter trades when the price deviates significantly from historical averages',
-    icon: ArrowDownUp,
-    riskLevel: 'Medium-High'
-  },
-  {
-    id: 'breakout',
-    name: 'Breakout Strategy',
-    description: 'Enter trades when price breaks through significant support or resistance levels',
-    icon: ChevronsUpDown,
-    riskLevel: 'High'
-  },
-  {
-    id: 'ml_adaptive',
-    name: 'ML Adaptive',
-    description: 'Use machine learning to dynamically optimize strategy parameters',
-    icon: Brain,
-    riskLevel: 'Variable'
-  }
-];
 
 const StrategyPanel: React.FC = () => {
   const { 
@@ -62,10 +32,13 @@ const StrategyPanel: React.FC = () => {
     strategyParams,
     updateStrategyParams,
     refreshData,
-    connectionStatus
+    connectionStatus,
+    availableStrategies,
+    dryRunMode,
+    toggleDryRunMode
   } = useTradingContext();
   
-  const selectedStrategyDetails = strategyOptions.find(strategy => strategy.id === selectedStrategy);
+  const selectedStrategyDetails = availableStrategies.find(strategy => strategy.id === selectedStrategy);
   const isDemoMode = connectionStatus.toLowerCase().includes('demo') || 
                     connectionStatus.toLowerCase().includes('cors');
 
@@ -113,6 +86,24 @@ const StrategyPanel: React.FC = () => {
               </span>
             )}
             
+            {dryRunMode && (
+              <span className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <FlaskConical className="h-3 w-3" />
+                Dry Run
+              </span>
+            )}
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleDryRunMode}
+              className="h-8"
+              title="Toggle Dry Run Mode"
+            >
+              <FlaskConical className="h-4 w-4 mr-1" />
+              {dryRunMode ? 'Real Mode' : 'Dry Run'}
+            </Button>
+            
             <Button
               variant="outline"
               size="icon"
@@ -157,10 +148,13 @@ const StrategyPanel: React.FC = () => {
               <SelectValue placeholder="Select a strategy" />
             </SelectTrigger>
             <SelectContent>
-              {strategyOptions.map(strategy => (
+              {availableStrategies.map(strategy => (
                 <SelectItem key={strategy.id} value={strategy.id} className="flex items-center gap-2">
                   <div className="flex items-center gap-2">
-                    <strategy.icon className="h-4 w-4" />
+                    {strategy.id === 'trend_following' && <TrendingUp className="h-4 w-4" />}
+                    {strategy.id === 'mean_reversion' && <ArrowDownUp className="h-4 w-4" />}
+                    {strategy.id === 'breakout' && <ChevronsUpDown className="h-4 w-4" />}
+                    {strategy.id === 'ml_adaptive' && <Brain className="h-4 w-4" />}
                     <span>{strategy.name}</span>
                   </div>
                 </SelectItem>
@@ -170,7 +164,10 @@ const StrategyPanel: React.FC = () => {
           
           {selectedStrategyDetails && (
             <div className="mt-2 bg-secondary/50 p-3 rounded-md flex gap-2 text-sm">
-              <selectedStrategyDetails.icon className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              {selectedStrategyDetails.id === 'trend_following' && <TrendingUp className="h-5 w-5 text-primary shrink-0 mt-0.5" />}
+              {selectedStrategyDetails.id === 'mean_reversion' && <ArrowDownUp className="h-5 w-5 text-primary shrink-0 mt-0.5" />}
+              {selectedStrategyDetails.id === 'breakout' && <ChevronsUpDown className="h-5 w-5 text-primary shrink-0 mt-0.5" />}
+              {selectedStrategyDetails.id === 'ml_adaptive' && <Brain className="h-5 w-5 text-primary shrink-0 mt-0.5" />}
               <div>
                 <p className="font-medium">{selectedStrategyDetails.name}</p>
                 <p className="text-muted-foreground mt-1">{selectedStrategyDetails.description}</p>
