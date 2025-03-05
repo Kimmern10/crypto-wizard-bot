@@ -6,6 +6,7 @@ import ActivePositions from './ActivePositions';
 import ConnectionStatus from './ConnectionStatus';
 import CorsWarning from './CorsWarning';
 import PerformanceSection from './PerformanceSection';
+import ApiDiagnostic from '@/components/ApiDiagnostic';
 
 interface DashboardLayoutProps {
   isConnected: boolean;
@@ -42,7 +43,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <CorsWarning corsBlocked={corsBlocked} />
+      {corsBlocked && <CorsWarning corsBlocked={corsBlocked} />}
+      
+      {isDemo && (
+        <ApiDiagnostic />
+      )}
     
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <PortfolioValue 

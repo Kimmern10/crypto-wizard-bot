@@ -22,11 +22,41 @@ serve(async (req) => {
   try {
     console.log('Proxy received request:', req.url);
     
+    // Special handler for health check
+    const url = new URL(req.url);
+    if (url.pathname.endsWith('/health') || url.searchParams.get('health') === 'check') {
+      return new Response(JSON.stringify({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        version: '1.0.1'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200
+      });
+    }
+    
     // Parse request data
-    const requestData = await req.json();
+    let requestData;
+    try {
+      requestData = await req.json();
+    } catch (e) {
+      console.error('Failed to parse request JSON:', e);
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON in request body' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
+    }
+    
     const { path, method, isPrivate, data, userId } = requestData;
     
-    console.log(`Processing request to ${path}, method: ${method}, private: ${isPrivate}`);
+    if (!path) {
+      return new Response(
+        JSON.stringify({ error: 'Missing required parameter: path' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
+    }
+    
+    console.log(`Processing request to ${path}, method: ${method || 'POST'}, private: ${isPrivate}`);
 
     // Initialize apiKey and apiSecret
     let apiKey = '';
@@ -42,10 +72,11 @@ serve(async (req) => {
       }
 
       // Get Supabase URL and key from environment variables
-      const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-      const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+      const supabaseUrl = Deno.env.get('SUPABASE_URL');
+      const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY');
       
       if (!supabaseUrl || !supabaseKey) {
+        console.error('Missing Supabase configuration');
         return new Response(
           JSON.stringify({ error: 'Supabase configuration is missing' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
@@ -56,27 +87,45 @@ serve(async (req) => {
       const supabase = createClient(supabaseUrl, supabaseKey);
       
       // Fetch API credentials for Kraken from the database
-      const { data: credentials, error } = await supabase
-        .from('api_credentials')
-        .select('api_key, api_secret')
-        .eq('user_id', userId)
-        .eq('exchange', 'kraken')
-        .maybeSingle();
+      try {
+        const { data: credentials, error } = await supabase
+          .from('api_credentials')
+          .select('api_key, api_secret')
+          .eq('user_id', userId)
+          .eq('exchange', 'kraken')
+          .maybeSingle();
 
-      if (error || !credentials) {
-        return new Response(
-          JSON.stringify({ error: 'Failed to fetch API credentials' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-        );
-      }
+        if (error) {
+          console.error('Database error fetching credentials:', error);
+          return new Response(
+            JSON.stringify({ error: 'Failed to fetch API credentials: ' + error.message }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+          );
+        }
 
-      apiKey = credentials.api_key;
-      apiSecret = credentials.api_secret;
-      
-      if (!apiKey || !apiSecret) {
+        if (!credentials) {
+          console.error('No API credentials found for userId:', userId);
+          return new Response(
+            JSON.stringify({ error: 'No API credentials found for this user' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+          );
+        }
+
+        apiKey = credentials.api_key;
+        apiSecret = credentials.api_secret;
+        
+        if (!apiKey || !apiSecret) {
+          console.error('Invalid API credentials (empty key or secret)');
+          return new Response(
+            JSON.stringify({ error: 'API key or secret is missing or invalid' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          );
+        }
+      } catch (error) {
+        console.error('Error fetching credentials from database:', error);
         return new Response(
-          JSON.stringify({ error: 'API key and secret are required for private endpoints' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          JSON.stringify({ error: 'Failed to fetch API credentials: ' + error.message }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
         );
       }
     }
@@ -106,15 +155,23 @@ serve(async (req) => {
         nonce
       };
       
-      // Create signature
-      const signature = createSignature(`/${API_VERSION}/${path}`, nonce, bodyData, apiSecret);
-      
-      // Add API key and signature to headers
-      options.headers = {
-        ...options.headers,
-        'API-Key': apiKey,
-        'API-Sign': signature
-      };
+      try {
+        // Create signature
+        const signature = createSignature(`/${API_VERSION}/${path}`, nonce, bodyData, apiSecret);
+        
+        // Add API key and signature to headers
+        options.headers = {
+          ...options.headers,
+          'API-Key': apiKey,
+          'API-Sign': signature
+        };
+      } catch (error) {
+        console.error('Error creating API signature:', error);
+        return new Response(
+          JSON.stringify({ error: 'Failed to create API signature: ' + error.message }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        );
+      }
     }
     
     // Convert data to URL-encoded format for POST
@@ -127,8 +184,27 @@ serve(async (req) => {
     console.log(`Sending request to Kraken API: ${url} with method ${options.method}`);
     
     // Send request to Kraken API
-    const response = await fetch(url, options);
-    const responseText = await response.text();
+    let response;
+    try {
+      response = await fetch(url, options);
+    } catch (error) {
+      console.error('Network error sending request to Kraken:', error);
+      return new Response(
+        JSON.stringify({ error: 'Network error calling Kraken API: ' + error.message }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 }
+      );
+    }
+    
+    let responseText;
+    try {
+      responseText = await response.text();
+    } catch (error) {
+      console.error('Error reading response from Kraken:', error);
+      return new Response(
+        JSON.stringify({ error: 'Failed to read Kraken API response: ' + error.message }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 }
+      );
+    }
     
     console.log(`Got response from Kraken API with status: ${response.status}`);
     console.log(`Response text: ${responseText.substring(0, 200)}...`);
@@ -138,7 +214,9 @@ serve(async (req) => {
       responseData = JSON.parse(responseText);
     } catch (e) {
       console.error(`Error parsing JSON response: ${e.message}`);
-      responseData = { error: `Invalid JSON response: ${responseText.substring(0, 100)}...` };
+      responseData = { 
+        error: [`Invalid JSON response from Kraken: ${responseText.substring(0, 100)}...`] 
+      };
     }
     
     // Check if Kraken API returned an error
@@ -152,7 +230,7 @@ serve(async (req) => {
       status: response.status
     });
   } catch (error) {
-    console.error('Error in Kraken proxy:', error);
+    console.error('Unexpected error in Kraken proxy:', error);
     
     // Return error message
     return new Response(
@@ -164,21 +242,26 @@ serve(async (req) => {
 
 // Function to create API signature
 function createSignature(path: string, nonce: string, postData: any, apiSecret: string): string {
-  // Decode base64 secret
-  const secret = CryptoJS.enc.Base64.parse(apiSecret);
-  
-  // Create the message to be signed
-  const message = postData.nonce + new URLSearchParams(postData).toString();
-  
-  // Create SHA256 hash of the message
-  const hash = CryptoJS.SHA256(message);
-  
-  // Create HMAC-SHA512 of the hashed message using the decoded secret
-  const hmac = CryptoJS.HmacSHA512(
-    path + hash.toString(CryptoJS.enc.Hex),
-    secret
-  );
-  
-  // Return base64-encoded signature
-  return CryptoJS.enc.Base64.stringify(hmac);
+  try {
+    // Decode base64 secret
+    const secret = CryptoJS.enc.Base64.parse(apiSecret);
+    
+    // Create the message to be signed
+    const message = postData.nonce + new URLSearchParams(postData).toString();
+    
+    // Create SHA256 hash of the message
+    const hash = CryptoJS.SHA256(message);
+    
+    // Create HMAC-SHA512 of the hashed message using the decoded secret
+    const hmac = CryptoJS.HmacSHA512(
+      path + hash.toString(CryptoJS.enc.Hex),
+      secret
+    );
+    
+    // Return base64-encoded signature
+    return CryptoJS.enc.Base64.stringify(hmac);
+  } catch (error) {
+    console.error('Error creating signature:', error);
+    throw new Error('Failed to create API signature: ' + error.message);
+  }
 }

@@ -82,3 +82,39 @@ export const checkCorsRestrictions = async (): Promise<boolean> => {
     return true;
   }
 };
+
+/**
+ * Checks if the Kraken proxy Edge Function is available
+ */
+export const checkProxyFunction = async (): Promise<boolean> => {
+  try {
+    console.log('Testing Kraken proxy Edge Function...');
+    
+    // Try to make a simple request to the proxy function
+    const { data, error } = await supabase.functions.invoke('kraken-proxy', {
+      body: {
+        path: 'public/Time',
+        method: 'GET',
+        isPrivate: false
+      }
+    });
+    
+    if (error) {
+      console.error('Kraken proxy check failed:', error);
+      return false;
+    }
+    
+    // Check if we got a valid response
+    if (data && data.result && data.result.unixtime) {
+      console.log('Kraken proxy check successful, server time:', 
+                  new Date(data.result.unixtime * 1000).toISOString());
+      return true;
+    }
+    
+    console.warn('Kraken proxy check returned unexpected data:', data);
+    return false;
+  } catch (error) {
+    console.error('Error in Kraken proxy check:', error);
+    return false;
+  }
+};

@@ -1,9 +1,11 @@
 
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Wifi, WifiOff, Server } from 'lucide-react';
+import { Wifi, WifiOff, Server, ExternalLink } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { checkKrakenProxyStatus } from '@/utils/websocketManager';
+import { useToast } from '@/hooks/use-toast';
 
 interface ConnectionStatusProps {
   isConnected: boolean;
@@ -28,6 +30,38 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   onRefresh,
   onReconnect
 }) => {
+  const { toast } = useToast();
+  const [isCheckingProxy, setIsCheckingProxy] = React.useState(false);
+  
+  const handleCheckProxy = async () => {
+    setIsCheckingProxy(true);
+    try {
+      const available = await checkKrakenProxyStatus();
+      if (available) {
+        toast({
+          title: "Kraken API proxy is available",
+          description: "Connection to Kraken API should work properly.",
+          variant: "success"
+        });
+      } else {
+        toast({
+          title: "Kraken API proxy is unavailable",
+          description: "Check Supabase Edge Functions and deployment status.",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error("Error checking proxy:", error);
+      toast({
+        title: "Error checking proxy",
+        description: "Failed to check Kraken API proxy status.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsCheckingProxy(false);
+    }
+  };
+  
   return (
     <Card className="glass-card animation-delay-300 animate-slide-up">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -80,25 +114,46 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
             Waiting for ticker data...
           </div>
         )}
-        <div className="flex gap-2 mt-3">
-          <Button 
-            onClick={onRefresh}
-            className="w-full text-xs py-1 h-auto"
-            variant="outline"
+        <div className="flex flex-col gap-2 mt-3">
+          <div className="flex gap-2">
+            <Button 
+              onClick={onRefresh}
+              className="w-full text-xs py-1 h-auto"
+              variant="outline"
+              size="sm"
+              disabled={refreshing}
+            >
+              {refreshing ? 'Refreshing...' : 'Refresh data'}
+            </Button>
+            <Button 
+              onClick={onReconnect}
+              className="w-full text-xs py-1 h-auto"
+              variant="outline"
+              size="sm"
+              disabled={attemptingReconnect}
+            >
+              {attemptingReconnect ? 'Reconnecting...' : 'Restart connection'}
+            </Button>
+          </div>
+          <Button
+            onClick={handleCheckProxy}
+            className="w-full text-xs py-1 h-auto mt-1"
+            variant="secondary"
             size="sm"
-            disabled={refreshing}
+            disabled={isCheckingProxy}
           >
-            {refreshing ? 'Refreshing...' : 'Refresh data'}
+            {isCheckingProxy ? 'Checking API Proxy...' : 'Check API Connection'}
           </Button>
-          <Button 
-            onClick={onReconnect}
-            className="w-full text-xs py-1 h-auto"
-            variant="outline"
-            size="sm"
-            disabled={attemptingReconnect}
-          >
-            {attemptingReconnect ? 'Reconnecting...' : 'Restart connection'}
-          </Button>
+          {isDemo && (
+            <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-md text-xs text-amber-800 dark:text-amber-400">
+              <div className="flex items-start gap-1">
+                <Server className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                <span>
+                  Currently in Demo Mode with simulated data. Your API credentials may not be connected.
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
