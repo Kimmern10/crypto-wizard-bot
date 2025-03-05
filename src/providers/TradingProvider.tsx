@@ -6,10 +6,12 @@ import { useKrakenApi } from '@/hooks/useKrakenApi';
 import { useStrategyState } from '@/hooks/useStrategyState';
 import { useTradeDataState } from '@/hooks/useTradeDataState';
 import { setupWebSocket } from '@/utils/tradingWebSocket';
-import { getKrakenWebSocket } from '@/utils/websocketManager';
+import { getKrakenWebSocket, initializeWebSocket } from '@/utils/websocketManager';
+import { toast } from 'sonner';
 
 export const TradingProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Initialize hooks for state management
   const strategyState = useStrategyState();
@@ -21,6 +23,7 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
       await krakenApi.connect();
     } catch (error) {
       console.error('Failed to connect to Kraken API:', error);
+      toast.error('Failed to connect to Kraken API');
     }
   };
 
@@ -40,10 +43,18 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
   // Initialize Kraken API service
   const krakenApi = useKrakenApi({ apiKey, apiSecret });
 
+  // Initialize WebSocket connection
+  useEffect(() => {
+    // Initialize WebSocket as early as possible
+    console.log('Initializing WebSocket connection...');
+    initializeWebSocket();
+    setIsInitializing(false);
+  }, []);
+  
   // Connect to WebSocket when API is configured
   useEffect(() => {
-    if (isApiConfigured) {
-      console.log('API is configured, setting up WebSocket...');
+    if (!isInitializing && (isApiConfigured || !apiKey)) {
+      console.log('API state resolved, setting up WebSocket...');
       const cleanup = setupWebSocket(
         getKrakenWebSocket(),
         tradeDataState.setConnectionStatus,
@@ -53,7 +64,7 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
       
       return cleanup;
     }
-  }, [isApiConfigured]);
+  }, [isApiConfigured, isInitializing, apiKey]);
 
   // Update balance and history when connected
   useEffect(() => {
@@ -61,22 +72,28 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
       // Fetch initial data
       const fetchInitialData = async () => {
         try {
+          console.log('Fetching initial balance data...');
           const balance = await krakenApi.fetchBalance();
           if (balance) {
             tradeDataState.setCurrentBalance(balance);
           }
           
+          console.log('Fetching initial trade history...');
           const history = await krakenApi.fetchTradeHistory();
           if (history) {
             tradeDataState.setTradeHistory(history);
           }
           
+          console.log('Fetching initial positions data...');
           const positions = await krakenApi.fetchOpenPositions();
           if (positions) {
             tradeDataState.setActivePositions(positions);
           }
+          
+          console.log('Initial data fetch complete');
         } catch (error) {
           console.error('Error fetching initial data:', error);
+          toast.error('Error fetching initial trading data');
         }
       };
       
@@ -87,25 +104,38 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
   // Refresh data function
   const refreshData = async () => {
     console.log('Manually refreshing data...');
+    toast.info('Refreshing trading data...');
+    
     try {
       if (krakenApi.isConnected) {
         const balance = await krakenApi.fetchBalance();
         if (balance) {
           tradeDataState.setCurrentBalance(balance);
+          console.log('Balance refreshed successfully');
         }
         
         const history = await krakenApi.fetchTradeHistory();
         if (history) {
           tradeDataState.setTradeHistory(history);
+          console.log('Trade history refreshed successfully');
         }
         
         const positions = await krakenApi.fetchOpenPositions();
         if (positions) {
           tradeDataState.setActivePositions(positions);
+          console.log('Positions refreshed successfully');
         }
+        
+        toast.success('Trading data refreshed successfully');
+        return true;
+      } else {
+        toast.error('Cannot refresh data: Not connected to API');
+        return false;
       }
     } catch (error) {
       console.error('Error refreshing data:', error);
+      toast.error('Failed to refresh trading data');
+      return false;
     }
   };
 

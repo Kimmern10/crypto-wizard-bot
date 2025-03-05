@@ -19,13 +19,21 @@ export class WebSocketCore {
   private lastMessageTimestamp = 0;
   private forceDemoMode = false;
   private activeSubscriptions: Set<string> = new Set();
+  private connectionAttemptStarted = 0;
 
   constructor(url: string) {
     this.url = url;
+    console.log(`WebSocketCore initialized with URL: ${url}`);
+  }
+
+  setConnectionAttempts(maxAttempts: number): void {
+    this.maxReconnectAttempts = maxAttempts;
   }
 
   setForceDemoMode(force: boolean): void {
     this.forceDemoMode = force;
+    console.log(`Demo mode ${force ? 'enabled' : 'disabled'}`);
+    
     if (force) {
       // If forcing demo mode, close any existing connection
       this.disconnect();
@@ -53,20 +61,46 @@ export class WebSocketCore {
     }
 
     if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+      console.log('WebSocket already connected or connecting');
       return Promise.resolve();
     }
 
     if (this.isConnecting) {
+      console.log('WebSocket connection already in progress');
       return Promise.resolve();
     }
 
     this.isConnecting = true;
+    this.connectionAttemptStarted = Date.now();
+    
     return new Promise((resolve, reject) => {
       try {
+        console.log(`Connecting to WebSocket at ${this.url}`);
         this.socket = new WebSocket(this.url);
 
+        // Set a connection timeout
+        const connectionTimeout = setTimeout(() => {
+          if (this.isConnecting) {
+            console.error('WebSocket connection attempt timed out');
+            this.isConnecting = false;
+            
+            if (this.socket) {
+              // Force close the socket if it's still trying to connect
+              try {
+                this.socket.close();
+                this.socket = null;
+              } catch (e) {
+                console.error('Error closing timed out socket:', e);
+              }
+            }
+            
+            reject(new Error('Connection timeout'));
+          }
+        }, 15000); // 15 second timeout
+        
         this.socket.onopen = () => {
           console.log('WebSocket connection established to', this.url);
+          clearTimeout(connectionTimeout);
           this.reconnectAttempts = 0;
           this.isConnecting = false;
           this.startHeartbeat();
@@ -90,11 +124,12 @@ export class WebSocketCore {
             const rawData = JSON.parse(event.data);
             this.processWebSocketMessage(rawData);
           } catch (error) {
-            console.error('Error parsing WebSocket message:', error);
+            console.error('Error parsing WebSocket message:', error, event.data);
           }
         };
 
         this.socket.onclose = (event) => {
+          clearTimeout(connectionTimeout);
           console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
           this.stopHeartbeat();
           this.socket = null;
@@ -108,10 +143,15 @@ export class WebSocketCore {
             } as ConnectionStatusData
           });
           
-          this.attemptReconnect();
+          // Only attempt reconnect if this wasn't a manual disconnect
+          const timeSinceStart = Date.now() - this.connectionAttemptStarted;
+          if (timeSinceStart > 500) { // Only reconnect if the connection was open for a while
+            this.attemptReconnect();
+          }
         };
 
         this.socket.onerror = (error) => {
+          clearTimeout(connectionTimeout);
           console.error('WebSocket error:', error);
           this.isConnecting = false;
           
@@ -126,6 +166,7 @@ export class WebSocketCore {
           reject(error);
         };
       } catch (error) {
+        console.error('Error creating WebSocket:', error);
         this.isConnecting = false;
         reject(error);
       }
@@ -134,6 +175,13 @@ export class WebSocketCore {
 
   // Process WebSocket messages based on their format
   private processWebSocketMessage(rawData: any): void {
+    // Print raw message for debugging
+    if (typeof rawData === 'object') {
+      if (!Array.isArray(rawData) && rawData.event !== 'heartbeat') {
+        console.log('Received WebSocket message:', JSON.stringify(rawData).substring(0, 200));
+      }
+    }
+    
     // Determine message type and format
     if (Array.isArray(rawData)) {
       // Ticker data from Kraken has this format
@@ -351,9 +399,35 @@ export class WebSocketCore {
       if (message.method === 'subscribe' && message.params?.pair) {
         const pairs = Array.isArray(message.params.pair) ? message.params.pair : [message.params.pair];
         pairs.forEach(pair => this.activeSubscriptions.add(pair));
+        
+        // Notify about subscription status even in demo mode
+        setTimeout(() => {
+          this.notifySubscribers({
+            type: 'subscriptionStatus',
+            data: {
+              event: 'subscriptionStatus',
+              status: 'subscribed',
+              pair: message.params.pair,
+              subscription: { name: message.params.name }
+            }
+          });
+        }, 500);
       } else if (message.method === 'unsubscribe' && message.params?.pair) {
         const pairs = Array.isArray(message.params.pair) ? message.params.pair : [message.params.pair];
         pairs.forEach(pair => this.activeSubscriptions.delete(pair));
+        
+        // Notify about unsubscription status even in demo mode
+        setTimeout(() => {
+          this.notifySubscribers({
+            type: 'subscriptionStatus',
+            data: {
+              event: 'subscriptionStatus',
+              status: 'unsubscribed',
+              pair: message.params.pair,
+              subscription: { name: message.params.name }
+            }
+          });
+        }, 500);
       }
       
       return true;

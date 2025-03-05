@@ -15,35 +15,55 @@ export const setupWebSocket = (
   setConnectionStatus('Checking connection method...');
   console.log('Determining best connection method for Kraken...');
   
-  // For Supabase-based trading bots, always use demo mode for WebSocket
-  // But send actual orders via Edge Function proxy
-  let demoModeReason = 'for WebSocket data feeds';
+  // Track demo mode reason if needed
+  let demoModeReason = '';
+  let demoModeActive = false;
+  let cleanupDemoData: (() => void) | null = null;
   
-  // Check if we can connect to WebSocket directly
+  // Check if we can connect to WebSocket directly with improved error handling
   checkWebSocketConnection()
     .then(canConnectWebSocket => {
       if (canConnectWebSocket) {
-        console.log('Direct WebSocket connection is possible');
+        console.log('Direct WebSocket connection is possible, connecting...');
+        setConnectionStatus('Direct connection available, connecting...');
         return connectAndSubscribe();
       } else {
-        console.log('Direct WebSocket connection not available, using demo mode');
-        demoModeReason = 'WebSocket connection not available';
+        console.log('Direct WebSocket connection not available, checking CORS restrictions...');
+        setConnectionStatus('Testing alternative connection methods...');
         
-        // Set demo mode for the WebSocket only
-        wsManager.setForceDemoMode(true);
-        
-        // Start demo data generation
-        const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
-        
-        // Notify the UI about the fallback
-        setConnectionStatus(`Demo Mode (${demoModeReason})`);
-        setLastConnectionEvent(`Switched to demo mode at ${new Date().toLocaleTimeString()}`);
-        
-        // Return cleanup function
-        return () => {
-          cleanupDemoData();
-          wsManager.disconnect();
-        };
+        // Check for CORS restrictions
+        return checkCorsRestrictions().then(hasCorsRestrictions => {
+          if (hasCorsRestrictions) {
+            console.log('CORS restrictions detected, using proxy connection...');
+            demoModeReason = 'CORS restrictions';
+            // Try to connect via proxy in future implementation
+            // For now, activate demo mode
+            demoModeActive = true;
+            wsManager.setForceDemoMode(true);
+            
+            // Start demo data generation
+            cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+            
+            // Notify the UI about the fallback
+            setConnectionStatus(`Demo Mode (${demoModeReason})`);
+            setLastConnectionEvent(`Switched to demo mode at ${new Date().toLocaleTimeString()}`);
+            
+            toast.warning('Using demo mode due to CORS restrictions. Real-time data not available.', {
+              duration: 5000,
+            });
+            
+            // Return cleanup function
+            return () => {
+              if (cleanupDemoData) cleanupDemoData();
+              wsManager.disconnect();
+            };
+          } else {
+            console.log('No CORS restrictions, but WebSocket still unavailable. Trying alternative method...');
+            // Try one more direct connection attempt with different parameters
+            wsManager.setConnectionAttempts(10); // Increase retry count
+            return connectAndSubscribe();
+          }
+        });
       }
     })
     .catch(error => {
@@ -51,15 +71,21 @@ export const setupWebSocket = (
       demoModeReason = 'connection check failed';
       
       // Fallback to demo mode
+      demoModeActive = true;
       wsManager.setForceDemoMode(true);
-      const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+      cleanupDemoData = simulateDemoTickerData(setLastTickerData);
       
       // Notify the UI
       setConnectionStatus(`Demo Mode (${demoModeReason})`);
       setLastConnectionEvent(`Error at ${new Date().toLocaleTimeString()}`);
       
+      toast.error('Failed to establish WebSocket connection', {
+        description: 'Using demo mode with simulated data',
+        duration: 5000,
+      });
+      
       return () => {
-        cleanupDemoData();
+        if (cleanupDemoData) cleanupDemoData();
         wsManager.disconnect();
       };
     });
@@ -75,7 +101,7 @@ export const setupWebSocket = (
         headers: {
           'Content-Type': 'application/json',
         },
-        // Do not use no-cors mode so we can detect CORS errors
+        // Important: Do not use no-cors mode so we can detect CORS errors
       });
       
       // If we get here without error, CORS is allowed
@@ -125,14 +151,19 @@ export const setupWebSocket = (
         }
         
         // Fallback to demo data after multiple reconnection failures
-        if (reconnectCount >= 3) {
+        if (reconnectCount >= 3 && !demoModeActive) {
           console.log('Multiple WebSocket connection failures, switching to demo data');
+          demoModeActive = true;
           wsManager.setForceDemoMode(true);
-          const cleanupDemoData = simulateDemoTickerData(setLastTickerData);
+          cleanupDemoData = simulateDemoTickerData(setLastTickerData);
           setConnectionStatus('Demo Mode (WebSocket connection failed)');
           
+          toast.warning('Switched to demo mode after multiple connection failures', {
+            duration: 5000,
+          });
+          
           return () => {
-            cleanupDemoData();
+            if (cleanupDemoData) cleanupDemoData();
           };
         }
       });
@@ -168,6 +199,7 @@ export const setupWebSocket = (
           setLastConnectionEvent(`Status change at ${new Date().toLocaleTimeString()}`);
         } else if (message.type === 'modeChange') {
           console.log('Mode change:', message.data);
+          demoModeActive = message.data.isDemoMode;
           setConnectionStatus(`Demo Mode (${message.data.reason})`);
           setLastConnectionEvent(`Mode change at ${new Date().toLocaleTimeString()}`);
         } else {
@@ -184,6 +216,10 @@ export const setupWebSocket = (
   // Return a cleanup function
   return () => {
     try {
+      if (cleanupDemoData) {
+        cleanupDemoData();
+      }
+      
       if (wsManager && wsManager.isConnected()) {
         wsManager.disconnect();
         console.log('WebSocket connection closed by cleanup');
