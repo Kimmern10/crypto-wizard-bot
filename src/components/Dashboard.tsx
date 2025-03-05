@@ -4,13 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { 
   Activity, 
   DollarSign, 
-  BarChart, 
   TrendingUp, 
   TrendingDown, 
   AlertTriangle, 
   Wifi, 
   WifiOff, 
-  AlertCircle,
   ServerCrash,
   Server
 } from 'lucide-react';
@@ -31,21 +29,30 @@ const Dashboard: React.FC = () => {
     lastTickerData,
     apiKey,
     isApiConfigured,
-    refreshData
+    refreshData,
+    restartConnection
   } = useTradingContext();
   
   const [isDemo, setIsDemo] = useState(false);
   const [corsBlocked, setCorsBlocked] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [attemptingReconnect, setAttemptingReconnect] = useState(false);
 
-  // Calculate total balance value in USD from actual data
-  const totalBalanceUSD = currentBalance.USD + 
-    (currentBalance.BTC * (lastTickerData['XBT/USD']?.c?.[0] || 36750)) + 
-    (currentBalance.ETH * (lastTickerData['ETH/USD']?.c?.[0] || 2470));
+  // Get the latest prices from ticker data or use defaults
+  const btcPrice = lastTickerData['XBT/USD']?.c?.[0] ? parseFloat(lastTickerData['XBT/USD'].c[0]) : 36750;
+  const ethPrice = lastTickerData['ETH/USD']?.c?.[0] ? parseFloat(lastTickerData['ETH/USD'].c[0]) : 2470;
+  
+  // Calculate total balance value in USD with proper validation
+  const totalBalanceUSD = (
+    (currentBalance.USD || 0) + 
+    ((currentBalance.BTC || 0) * btcPrice) + 
+    ((currentBalance.ETH || 0) * ethPrice)
+  );
 
-  // Get a random value between -3 and 5 for daily change if we don't have real data
-  const dailyChangePercent = lastTickerData['XBT/USD']?.p?.[1] || 
-    (Math.round((Math.random() * 8 - 3) * 10) / 10);
+  // Get daily price change for BTC (as an overall market indicator)
+  const dailyChangePercent = lastTickerData['XBT/USD']?.p?.[1] 
+    ? parseFloat(lastTickerData['XBT/USD'].p[1]) 
+    : (Math.round((Math.random() * 8 - 3) * 10) / 10);
   
   // Check if we're in demo mode or real mode
   useEffect(() => {
@@ -73,12 +80,7 @@ const Dashboard: React.FC = () => {
   
   // Debug connection status
   useEffect(() => {
-    if (isConnected) {
-      console.log('Dashboard detected connection status: Connected');
-    } else {
-      console.log('Dashboard detected connection status: Disconnected');
-    }
-    
+    console.log('Dashboard detected connection status:', isConnected ? 'Connected' : 'Disconnected');
     console.log('API configuration status:', isApiConfigured ? 'Configured' : 'Not configured');
     console.log('Current connection status:', connectionStatus);
     
@@ -102,6 +104,24 @@ const Dashboard: React.FC = () => {
       })
       .finally(() => {
         setRefreshing(false);
+      });
+  };
+  
+  // Handle reconnect button click
+  const handleReconnect = () => {
+    console.log('Manually restarting connection...');
+    setAttemptingReconnect(true);
+    
+    restartConnection()
+      .then(() => {
+        toast.success('Connection restarted successfully');
+      })
+      .catch((error) => {
+        console.error('Error restarting connection:', error);
+        toast.error('Failed to restart connection');
+      })
+      .finally(() => {
+        setAttemptingReconnect(false);
       });
   };
 
@@ -164,7 +184,7 @@ const Dashboard: React.FC = () => {
                   ? <TrendingUp className="h-3 w-3 mr-1" /> 
                   : <TrendingDown className="h-3 w-3 mr-1" />
                 }
-                {dailyChangePercent >= 0 ? "+" : ""}{dailyChangePercent}% today
+                {dailyChangePercent >= 0 ? "+" : ""}{dailyChangePercent.toFixed(2)}% today
               </span>
             </div>
           </CardContent>
@@ -228,7 +248,7 @@ const Dashboard: React.FC = () => {
                   <div key={pair} className="text-xs flex justify-between mt-1">
                     <span>{pair}:</span>
                     <span className={cn(
-                      parseFloat(lastTickerData[pair]?.c?.[0]) > parseFloat(lastTickerData[pair]?.o?.[0])
+                      parseFloat(lastTickerData[pair]?.c?.[0] || '0') > parseFloat(lastTickerData[pair]?.o?.[0] || '0')
                         ? "text-green-600"
                         : "text-red-600"
                     )}>
@@ -247,20 +267,31 @@ const Dashboard: React.FC = () => {
                 Waiting for ticker data...
               </div>
             )}
-            <Button 
-              onClick={handleRefresh}
-              className="mt-3 w-full text-xs py-1 h-auto"
-              variant="outline"
-              size="sm"
-              disabled={refreshing}
-            >
-              {refreshing ? 'Refreshing...' : 'Manually refresh data'}
-            </Button>
+            <div className="flex gap-2 mt-3">
+              <Button 
+                onClick={handleRefresh}
+                className="w-full text-xs py-1 h-auto"
+                variant="outline"
+                size="sm"
+                disabled={refreshing}
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh data'}
+              </Button>
+              <Button 
+                onClick={handleReconnect}
+                className="w-full text-xs py-1 h-auto"
+                variant="outline"
+                size="sm"
+                disabled={attemptingReconnect}
+              >
+                {attemptingReconnect ? 'Reconnecting...' : 'Restart connection'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* New LiveChart component */}
+      {/* LiveChart component */}
       <LiveChart />
 
       <Card className="glass-card">

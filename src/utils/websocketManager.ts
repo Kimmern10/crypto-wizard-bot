@@ -29,12 +29,17 @@ export const initializeWebSocket = () => {
 };
 
 // Function to restart the WebSocket connection
-export const restartWebSocket = () => {
+export const restartWebSocket = async () => {
+  console.log('Restarting WebSocket connection...');
   const ws = getKrakenWebSocket();
   
   // First disconnect if connected
   if (ws.isConnected()) {
+    console.log('Disconnecting current WebSocket connection...');
     ws.disconnect();
+    
+    // Short delay to ensure proper disconnect before reconnect
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
   
   // Clear demo mode
@@ -43,6 +48,14 @@ export const restartWebSocket = () => {
   // Try to reconnect
   return ws.connect().catch(error => {
     console.error('Failed to restart WebSocket connection:', error);
+    
+    // If connection fails, activate demo mode after a short delay
+    setTimeout(() => {
+      if (!ws.isConnected() && !ws.isForceDemoMode()) {
+        console.log('Connection failed after restart, activating demo mode');
+        ws.setForceDemoMode(true);
+      }
+    }, 3000);
   });
 };
 

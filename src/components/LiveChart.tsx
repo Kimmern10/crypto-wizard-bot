@@ -1,12 +1,13 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { getKrakenWebSocket, getConnectionStatus, type WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
-import { ArrowUp, ArrowDown, Clock, Activity, RefreshCw, WifiOff, Wifi } from 'lucide-react';
+import { ArrowUp, ArrowDown, RefreshCw, WifiOff, Wifi } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PriceDataPoint {
@@ -26,14 +27,16 @@ interface ChartState {
 }
 
 const initialTimeRanges = ['1H', '6H', '24H', '7D'];
+const defaultPairs = ['XBT/USD', 'ETH/USD', 'XRP/USD', 'SOL/USD', 'DOT/USD', 'ADA/USD'];
 
 const LiveChart: React.FC = () => {
-  const { isConnected, lastTickerData, connectionStatus } = useTradingContext();
+  const { isConnected, lastTickerData, connectionStatus, restartConnection } = useTradingContext();
   
   const [selectedPair, setSelectedPair] = useState<string>('XBT/USD');
-  const [availablePairs, setAvailablePairs] = useState<string[]>(['XBT/USD', 'ETH/USD', 'XRP/USD', 'DOT/USD', 'ADA/USD']);
+  const [availablePairs, setAvailablePairs] = useState<string[]>(defaultPairs);
   const [activeTimeRange, setActiveTimeRange] = useState<string>(initialTimeRanges[1]);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('initializing');
+  const [refreshingChart, setRefreshingChart] = useState<boolean>(false);
   
   const [chartState, setChartState] = useState<ChartState>({
     data: [],
@@ -59,11 +62,12 @@ const LiveChart: React.FC = () => {
   
   const updateChartWithTickerData = (tickerData: any, pair: string) => {
     if (!tickerData || !tickerData.c || !tickerData.c[0]) {
+      console.warn('Invalid ticker data received:', tickerData);
       return;
     }
     
     const currentPrice = parseFloat(tickerData.c[0]);
-    const currentVolume = parseFloat(tickerData.v[1] || '0');
+    const currentVolume = parseFloat(tickerData.v?.[1] || '0');
     const timestamp = new Date();
     
     const newDataPoint: PriceDataPoint = {
@@ -86,19 +90,40 @@ const LiveChart: React.FC = () => {
         default: timeWindow = 24 * 60 * 60 * 1000;
       }
       
-      collection.dataByTimeRange[range].push(newDataPoint);
+      // Add new data point to this time range
+      collection.dataByTimeRange[range].push({...newDataPoint});
       
+      // Filter out data points that are outside of the time window
       collection.dataByTimeRange[range] = collection.dataByTimeRange[range]
         .filter(point => {
-          const pointTime = new Date(timestamp);
-          pointTime.setHours(
-            parseInt(point.time.split(':')[0]),
-            parseInt(point.time.split(':')[1]),
-            parseInt(point.time.split(':')[2].split(' ')[0])
+          const timeComponents = point.time.split(':');
+          const hours = parseInt(timeComponents[0]);
+          const minutes = parseInt(timeComponents[1]);
+          const secondsWithAmPm = timeComponents[2];
+          
+          // Handle AM/PM format if present
+          let seconds = 0;
+          let isPM = false;
+          
+          if (secondsWithAmPm.includes(' ')) {
+            const [sec, ampm] = secondsWithAmPm.split(' ');
+            seconds = parseInt(sec);
+            isPM = ampm.toUpperCase() === 'PM';
+          } else {
+            seconds = parseInt(secondsWithAmPm);
+          }
+          
+          const pointDate = new Date();
+          pointDate.setHours(
+            isPM && hours < 12 ? hours + 12 : hours,
+            minutes,
+            seconds
           );
-          return now - pointTime.getTime() < timeWindow;
+          
+          return now - pointDate.getTime() < timeWindow;
         });
       
+      // Limit the number of data points to prevent memory issues
       if (collection.dataByTimeRange[range].length > collection.maxDataPoints) {
         collection.dataByTimeRange[range] = collection.dataByTimeRange[range].slice(
           collection.dataByTimeRange[range].length - collection.maxDataPoints
@@ -106,28 +131,33 @@ const LiveChart: React.FC = () => {
       }
     });
     
-    const firstPrice = collection.dataByTimeRange[activeTimeRange][0]?.price || currentPrice;
-    const priceChange = currentPrice - firstPrice;
-    const priceChangePercent = (priceChange / firstPrice) * 100;
-    
-    const pricesInRange = collection.dataByTimeRange[activeTimeRange].map(d => d.price);
-    const highPrice = Math.max(...pricesInRange, 0);
-    const lowPrice = Math.min(...pricesInRange, Infinity);
-    
-    const totalVolume = collection.dataByTimeRange[activeTimeRange]
-      .reduce((sum, point) => sum + (point.volume || 0), 0);
-    
-    setChartState({
-      data: [...collection.dataByTimeRange[activeTimeRange]],
-      lastPrice: currentPrice,
-      priceChange,
-      priceChangePercent,
-      highPrice,
-      lowPrice: lowPrice === Infinity ? 0 : lowPrice,
-      volume: totalVolume
-    });
+    // Calculate statistics for the current time range
+    const dataForRange = collection.dataByTimeRange[activeTimeRange];
+    if (dataForRange.length > 0) {
+      const firstPrice = dataForRange[0]?.price || currentPrice;
+      const priceChange = currentPrice - firstPrice;
+      const priceChangePercent = (priceChange / firstPrice) * 100;
+      
+      const pricesInRange = dataForRange.map(d => d.price);
+      const highPrice = Math.max(...pricesInRange, 0);
+      const lowPrice = Math.min(...pricesInRange, Infinity);
+      
+      const totalVolume = dataForRange
+        .reduce((sum, point) => sum + (point.volume || 0), 0);
+      
+      setChartState({
+        data: [...dataForRange],
+        lastPrice: currentPrice,
+        priceChange,
+        priceChangePercent,
+        highPrice,
+        lowPrice: lowPrice === Infinity ? 0 : lowPrice,
+        volume: totalVolume
+      });
+    }
   };
   
+  // Set up WebSocket subscription when selected pair changes
   useEffect(() => {
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
     
@@ -143,6 +173,7 @@ const LiveChart: React.FC = () => {
     
     const wsManager = getKrakenWebSocket();
     
+    // Handler for all WebSocket messages
     const handleTickerUpdate = (message: WebSocketMessage) => {
       if (message.type === 'ticker' && message.data.pair === selectedPair) {
         updateChartWithTickerData(message.data, selectedPair);
@@ -150,17 +181,24 @@ const LiveChart: React.FC = () => {
       } else if (message.type === 'subscriptionStatus') {
         if (message.data.status === 'subscribed' && message.data.pair === selectedPair) {
           setSubscriptionStatus('active');
+          console.log(`Successfully subscribed to ${selectedPair}`);
         } else if (message.data.status === 'error') {
           setSubscriptionStatus('error');
+          console.error(`Subscription error for ${selectedPair}:`, message.data.errorMessage || 'Unknown error');
           toast.error(`Subscription error: ${message.data.errorMessage || 'Unknown error'}`);
         }
       } else if (message.type === 'error') {
         setSubscriptionStatus('error');
+        console.error('WebSocket error:', message.data);
+      } else if (message.type === 'connectionStatus' && message.data.status === 'disconnected') {
+        setSubscriptionStatus('disconnected');
       }
     };
     
+    // Subscribe to WebSocket messages
     const unsubscribe = wsManager.subscribe(handleTickerUpdate);
     
+    // Request subscription to the selected pair
     wsManager.send({
       event: "subscribe",
       pair: [selectedPair],
@@ -169,6 +207,7 @@ const LiveChart: React.FC = () => {
       }
     });
     
+    // Use any existing data we might have
     if (lastTickerData && lastTickerData[selectedPair]) {
       updateChartWithTickerData(lastTickerData[selectedPair], selectedPair);
     }
@@ -176,6 +215,7 @@ const LiveChart: React.FC = () => {
     dataCollectionRef.current.isActive = true;
     dataCollectionRef.current.startTime = Date.now();
     
+    // Cleanup: unsubscribe from messages and ticker
     return () => {
       unsubscribe();
       wsManager.send({
@@ -188,14 +228,11 @@ const LiveChart: React.FC = () => {
     };
   }, [isConnected, selectedPair, lastTickerData]);
   
+  // Update chart when time range changes
   useEffect(() => {
-    setChartState(prev => ({
-      ...prev,
-      data: [...dataCollectionRef.current.dataByTimeRange[activeTimeRange]]
-    }));
+    const dataForRange = dataCollectionRef.current.dataByTimeRange[activeTimeRange];
     
-    if (dataCollectionRef.current.dataByTimeRange[activeTimeRange].length > 0) {
-      const dataForRange = dataCollectionRef.current.dataByTimeRange[activeTimeRange];
+    if (dataForRange.length > 0) {
       const currentPrice = dataForRange[dataForRange.length - 1].price;
       const firstPrice = dataForRange[0].price;
       const priceChange = currentPrice - firstPrice;
@@ -208,18 +245,19 @@ const LiveChart: React.FC = () => {
       const totalVolume = dataForRange
         .reduce((sum, point) => sum + (point.volume || 0), 0);
       
-      setChartState(prev => ({
-        ...prev,
+      setChartState({
+        data: [...dataForRange],
         lastPrice: currentPrice,
         priceChange,
         priceChangePercent,
         highPrice,
         lowPrice: lowPrice === Infinity ? 0 : lowPrice,
         volume: totalVolume
-      }));
+      });
     }
   }, [activeTimeRange]);
   
+  // Function to generate demo data when not connected
   const generateDemoData = (pair: string) => {
     console.log(`Generating demo data for ${pair}`);
     
@@ -232,6 +270,7 @@ const LiveChart: React.FC = () => {
       'XBT/USD': 36750,
       'ETH/USD': 2470,
       'XRP/USD': 0.52,
+      'SOL/USD': 148.25,
       'DOT/USD': 7.20,
       'ADA/USD': 0.45
     };
@@ -310,6 +349,7 @@ const LiveChart: React.FC = () => {
     });
   };
   
+  // Helper function to format prices based on magnitude
   const formatPrice = (price: number) => {
     if (price >= 1000) {
       return price.toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -320,11 +360,23 @@ const LiveChart: React.FC = () => {
     }
   };
   
-  const handleRefresh = () => {
+  // Function to refresh chart data
+  const handleRefresh = async () => {
+    setRefreshingChart(true);
+    
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
     
     if (!wsConnected && !isDemoMode) {
-      toast.warning("Ikke tilkoblet WebSocket. Kan ikke hente nye data.");
+      try {
+        // Try to restart the connection
+        await restartConnection();
+        toast.success("WebSocket connection restarted");
+      } catch (error) {
+        console.error("Failed to restart connection:", error);
+        toast.error("Could not connect to WebSocket");
+        generateDemoData(selectedPair);
+      }
+      setRefreshingChart(false);
       return;
     }
     
@@ -341,6 +393,7 @@ const LiveChart: React.FC = () => {
       }
     });
     
+    // Wait a brief moment before resubscribing
     setTimeout(() => {
       wsManager.send({
         event: "subscribe",
@@ -350,11 +403,12 @@ const LiveChart: React.FC = () => {
         }
       });
       
-      toast.success(`Oppdaterer data for ${selectedPair}`);
+      toast.success(`Refreshing chart data for ${selectedPair}`);
+      setRefreshingChart(false);
     }, 500);
   };
   
-  // Function to get status indication color
+  // Function to get status indication color based on connection state
   const getStatusColor = () => {
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
     
@@ -368,7 +422,7 @@ const LiveChart: React.FC = () => {
     return "bg-gray-100 text-gray-800";
   };
   
-  // Function to get status icon
+  // Function to get appropriate status icon
   const StatusIcon = () => {
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
     
@@ -380,18 +434,18 @@ const LiveChart: React.FC = () => {
     return <WifiOff className="h-3 w-3 mr-1" />;
   };
   
-  // Function to get status text
+  // Function to get user-friendly status text
   const getStatusText = () => {
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
     
-    if (!wsConnected && !isDemoMode) return "Ikke tilkoblet";
-    if (isDemoMode) return "Demo Modus";
-    if (subscriptionStatus === 'active') return "Tilkoblet";
-    if (subscriptionStatus === 'error') return "Tilkoblingsfeil";
-    if (subscriptionStatus === 'subscribing') return "Kobler til...";
-    if (subscriptionStatus === 'resubscribing') return "Oppdaterer tilkobling...";
+    if (!wsConnected && !isDemoMode) return "Not connected";
+    if (isDemoMode) return "Demo Mode";
+    if (subscriptionStatus === 'active') return "Connected";
+    if (subscriptionStatus === 'error') return "Connection error";
+    if (subscriptionStatus === 'subscribing') return "Connecting...";
+    if (subscriptionStatus === 'resubscribing') return "Updating connection...";
     
-    return "Ukjent status";
+    return "Unknown status";
   };
   
   return (
@@ -431,10 +485,11 @@ const LiveChart: React.FC = () => {
             onClick={handleRefresh} 
             className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
             title="Refresh data"
+            disabled={refreshingChart}
           >
             <RefreshCw className={cn(
               "h-4 w-4",
-              subscriptionStatus === 'resubscribing' && "animate-spin"
+              refreshingChart && "animate-spin"
             )} />
           </button>
         </div>
