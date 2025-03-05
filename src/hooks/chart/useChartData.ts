@@ -5,6 +5,7 @@ import { useTradingContext } from '@/hooks/useTradingContext';
 import { getKrakenWebSocket, getConnectionStatus, type WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
 import { generateDemoData, updateChartWithTickerData, updateChartForTimeRange } from '@/components/chart/chartUtils';
+import { handleWebSocketMessage } from '@/utils/websocket/messageHandler';
 
 const initialTimeRanges = ['1H', '6H', '24H', '7D'];
 const defaultPairs = ['XBT/USD', 'ETH/USD', 'XRP/USD', 'SOL/USD', 'DOT/USD', 'ADA/USD'];
@@ -34,6 +35,7 @@ export function useChartData(): UseChartDataReturn {
   const [activeTimeRange, setActiveTimeRange] = useState<string>(initialTimeRanges[1]);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('initializing');
   const [refreshingChart, setRefreshingChart] = useState<boolean>(false);
+  const [lastConnectionEvent, setLastConnectionEvent] = useState<string>('');
   
   const [chartState, setChartState] = useState<ChartState>({
     data: [],
@@ -75,24 +77,18 @@ export function useChartData(): UseChartDataReturn {
     
     // Handler for all WebSocket messages
     const handleTickerUpdate = (message: WebSocketMessage) => {
-      if (message.type === 'ticker' && message.data.pair === selectedPair) {
-        updateChartWithTickerData(message.data, selectedPair, activeTimeRange, dataCollectionRef, setChartState);
-        setSubscriptionStatus('active');
-      } else if (message.type === 'subscriptionStatus') {
-        if (message.data.status === 'subscribed' && message.data.pair === selectedPair) {
-          setSubscriptionStatus('active');
-          console.log(`Successfully subscribed to ${selectedPair}`);
-        } else if (message.data.status === 'error') {
-          setSubscriptionStatus('error');
-          console.error(`Subscription error for ${selectedPair}:`, message.data.errorMessage || 'Unknown error');
-          toast.error(`Subscription error: ${message.data.errorMessage || 'Unknown error'}`);
+      // Use the centralized message handler
+      handleWebSocketMessage(
+        message, 
+        setSubscriptionStatus,
+        setLastConnectionEvent,
+        (updateFn) => {
+          if (message.type === 'ticker' && message.data.pair === selectedPair) {
+            updateChartWithTickerData(message.data, selectedPair, activeTimeRange, dataCollectionRef, setChartState);
+            setSubscriptionStatus('active');
+          }
         }
-      } else if (message.type === 'error') {
-        setSubscriptionStatus('error');
-        console.error('WebSocket error:', message.data);
-      } else if (message.type === 'connectionStatus' && message.data.status === 'disconnected') {
-        setSubscriptionStatus('disconnected');
-      }
+      );
     };
     
     // Subscribe to WebSocket messages
