@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'react';
 import { getKrakenWebSocket } from '@/utils/websocketManager';
 import { toast } from 'sonner';
@@ -261,10 +260,10 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     
     const ws = getKrakenWebSocket();
     ws.send({
-      method: 'subscribe',
-      params: {
-        name: 'ticker',
-        pair: [pair]
+      event: "subscribe",
+      pair: [pair],
+      subscription: {
+        name: "ticker"
       }
     });
     
@@ -278,10 +277,10 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     
     const ws = getKrakenWebSocket();
     ws.send({
-      method: 'unsubscribe',
-      params: {
-        name: 'ticker',
-        pair: [pair]
+      event: "unsubscribe",
+      pair: [pair],
+      subscription: {
+        name: "ticker"
       }
     });
     

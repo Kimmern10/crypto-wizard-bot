@@ -151,7 +151,7 @@ export const subscribeToTickers = (wsManager: WebSocketCore, pairs: string[]): v
     setTimeout(() => {
       if (wsManager.isConnected()) {
         console.log(`Subscribing to ${pair} ticker...`);
-        // FIXED: Use correct Kraken WebSocket API subscription format
+        // Using correct Kraken WebSocket API subscription format
         wsManager.send({
           event: "subscribe",
           pair: [pair],

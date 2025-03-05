@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -166,7 +165,7 @@ const LiveChart: React.FC = () => {
     // Subscribe to ticker updates for the selected pair
     const unsubscribe = wsManager.subscribe(handleTickerUpdate);
     
-    // Subscribe to ticker for the selected pair - Updated to correct format
+    // Subscribe to ticker for the selected pair - Using correct Kraken format
     wsManager.send({
       event: "subscribe",
       pair: [selectedPair],

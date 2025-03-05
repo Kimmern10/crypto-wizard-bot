@@ -20,6 +20,7 @@ export class WebSocketCore {
   private forceDemoMode = false;
   private activeSubscriptions: Set<string> = new Set();
   private connectionAttemptStarted = 0;
+  private connectionFailures = 0;
 
   constructor(url: string) {
     this.url = url;
@@ -83,6 +84,7 @@ export class WebSocketCore {
           if (this.isConnecting) {
             console.error('WebSocket connection attempt timed out');
             this.isConnecting = false;
+            this.connectionFailures++;
             
             if (this.socket) {
               // Force close the socket if it's still trying to connect
@@ -102,6 +104,7 @@ export class WebSocketCore {
           console.log('WebSocket connection established to', this.url);
           clearTimeout(connectionTimeout);
           this.reconnectAttempts = 0;
+          this.connectionFailures = 0;
           this.isConnecting = false;
           this.startHeartbeat();
           this.lastMessageTimestamp = Date.now();
@@ -154,6 +157,7 @@ export class WebSocketCore {
           clearTimeout(connectionTimeout);
           console.error('WebSocket error:', error);
           this.isConnecting = false;
+          this.connectionFailures++;
           
           this.notifySubscribers({
             type: 'connectionStatus',
@@ -168,6 +172,7 @@ export class WebSocketCore {
       } catch (error) {
         console.error('Error creating WebSocket:', error);
         this.isConnecting = false;
+        this.connectionFailures++;
         reject(error);
       }
     });
@@ -177,8 +182,19 @@ export class WebSocketCore {
   private processWebSocketMessage(rawData: any): void {
     // Print raw message for debugging
     if (typeof rawData === 'object') {
-      if (!Array.isArray(rawData) && rawData.event !== 'heartbeat') {
+      if (!Array.isArray(rawData) && rawData.event && rawData.event !== 'heartbeat' && rawData.event !== 'pong') {
         console.log('Received WebSocket message:', JSON.stringify(rawData).substring(0, 200));
+      }
+      
+      // Process heartbeat responses
+      if (rawData.event === 'pong') {
+        console.log('Received WebSocket message:', JSON.stringify(rawData));
+        const message: WebSocketMessage = {
+          type: 'pong',
+          data: { time: new Date() }
+        };
+        this.messageHandlers.forEach(handler => handler(message));
+        return;
       }
     }
     
@@ -189,11 +205,18 @@ export class WebSocketCore {
         const pairName = rawData[3];
         const tickerData = rawData[1];
         
+        // Validate ticker data
+        if (!pairName || !tickerData.c || !Array.isArray(tickerData.c) || !tickerData.c[0]) {
+          console.warn('Received invalid ticker data format:', rawData);
+          return;
+        }
+        
         const message: WebSocketMessage = {
           type: 'ticker',
           data: {
             pair: pairName,
-            ...tickerData
+            ...tickerData,
+            timestamp: new Date().toISOString()
           }
         };
         
@@ -233,6 +256,13 @@ export class WebSocketCore {
           
           const message: WebSocketMessage = {
             type: 'subscriptionStatus',
+            data: rawData
+          };
+          this.messageHandlers.forEach(handler => handler(message));
+        } else if (rawData.status === 'error') {
+          console.error('Subscription error:', rawData.errorMessage);
+          const message: WebSocketMessage = {
+            type: 'error',
             data: rawData
           };
           this.messageHandlers.forEach(handler => handler(message));
@@ -281,11 +311,12 @@ export class WebSocketCore {
       // Resubscribe to each ticker with a small delay
       Array.from(this.activeSubscriptions).forEach((pair, index) => {
         setTimeout(() => {
+          // FIXED: Using correct Kraken WebSocket API subscription format
           this.send({
-            method: 'subscribe',
-            params: {
-              name: 'ticker',
-              pair: [pair]
+            event: "subscribe",
+            pair: [pair],
+            subscription: {
+              name: "ticker"
             }
           });
         }, index * 300); // 300ms delay between subscriptions
@@ -313,6 +344,12 @@ export class WebSocketCore {
           message: 'Maximum reconnection attempts reached' 
         } as ConnectionStatusData
       });
+      
+      // Only force demo mode after persistent connection failures
+      if (this.connectionFailures > 10) {
+        console.log('Persistent connection failures detected, switching to demo mode');
+        this.setForceDemoMode(true);
+      }
       
       return;
     }
@@ -350,8 +387,9 @@ export class WebSocketCore {
           return;
         }
         
-        // Send a ping message to Kraken - Updated to correct format
+        // Send a ping message to Kraken
         this.send({ event: 'ping' });
+        console.log('Sending heartbeat ping to Kraken WebSocket');
       } else {
         this.reconnect();
       }
@@ -396,8 +434,8 @@ export class WebSocketCore {
       console.log('In demo mode, not sending actual message:', message);
       
       // For subscriptions in demo mode, track them anyway
-      if (message.method === 'subscribe' && message.params?.pair) {
-        const pairs = Array.isArray(message.params.pair) ? message.params.pair : [message.params.pair];
+      if (message.event === 'subscribe' && message.pair) {
+        const pairs = Array.isArray(message.pair) ? message.pair : [message.pair];
         pairs.forEach(pair => this.activeSubscriptions.add(pair));
         
         // Notify about subscription status even in demo mode
@@ -407,13 +445,13 @@ export class WebSocketCore {
             data: {
               event: 'subscriptionStatus',
               status: 'subscribed',
-              pair: message.params.pair,
-              subscription: { name: message.params.name }
+              pair: message.pair,
+              subscription: { name: message.subscription?.name }
             }
           });
         }, 500);
-      } else if (message.method === 'unsubscribe' && message.params?.pair) {
-        const pairs = Array.isArray(message.params.pair) ? message.params.pair : [message.params.pair];
+      } else if (message.event === 'unsubscribe' && message.pair) {
+        const pairs = Array.isArray(message.pair) ? message.pair : [message.pair];
         pairs.forEach(pair => this.activeSubscriptions.delete(pair));
         
         // Notify about unsubscription status even in demo mode
@@ -423,8 +461,8 @@ export class WebSocketCore {
             data: {
               event: 'subscriptionStatus',
               status: 'unsubscribed',
-              pair: message.params.pair,
-              subscription: { name: message.params.name }
+              pair: message.pair,
+              subscription: { name: message.subscription?.name }
             }
           });
         }, 500);
@@ -439,7 +477,9 @@ export class WebSocketCore {
     }
 
     try {
-      this.socket.send(JSON.stringify(message));
+      const messageStr = JSON.stringify(message);
+      console.log('Sending WebSocket message:', messageStr);
+      this.socket.send(messageStr);
       return true;
     } catch (error) {
       console.error('Error sending WebSocket message:', error);
