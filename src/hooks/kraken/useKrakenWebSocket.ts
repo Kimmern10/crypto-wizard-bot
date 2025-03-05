@@ -1,6 +1,6 @@
 
 import { useCallback } from 'react';
-import { getKrakenWebSocket, getConnectionStatus } from '@/utils/websocketManager';
+import { getKrakenWebSocket, getConnectionStatus } from '@/utils/websocket/krakenWebSocketManager';
 
 export const useKrakenWebSocket = () => {
   const subscribeToTicker = useCallback((pair: string) => {
