@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { AlertCircle, KeyRound, EyeOff, Eye, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 const ApiKeyModal: React.FC = () => {
   const { 
@@ -19,34 +20,54 @@ const ApiKeyModal: React.FC = () => {
     isLoadingCredentials 
   } = useTradingContext();
   
-  const [keyInput, setKeyInput] = useState(apiKey);
-  const [secretInput, setSecretInput] = useState(apiSecret);
+  const [keyInput, setKeyInput] = useState('');
+  const [secretInput, setSecretInput] = useState('');
   const [showSecret, setShowSecret] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
+  // Reset state when modal opens or changes
   useEffect(() => {
-    // Sjekk om brukeren er logget inn når modalen åpnes
     if (isApiKeyModalOpen) {
       checkAuthStatus();
-      // Oppdater inputs når apiKey og apiSecret endres
-      setKeyInput(apiKey);
-      setSecretInput(apiSecret);
+      // Use values from context, but don't cause infinite rerenders
+      setKeyInput(apiKey || '');
+      setSecretInput(apiSecret || '');
+      setHasError(false);
     }
-  }, [isApiKeyModalOpen, apiKey, apiSecret]);
+  }, [isApiKeyModalOpen]);
 
   const checkAuthStatus = async () => {
-    const { data } = await supabase.auth.getSession();
-    setIsLoggedIn(!!data.session);
+    try {
+      const { data } = await supabase.auth.getSession();
+      setIsLoggedIn(!!data.session);
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      setIsLoggedIn(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (keyInput && secretInput) {
+    setHasError(false);
+    
+    if (!keyInput || !secretInput) {
+      toast.error('Both API key and secret are required');
+      return;
+    }
+
+    try {
       setIsSubmitting(true);
       await setApiCredentials(keyInput, secretInput);
-      setIsSubmitting(false);
+      toast.success('API credentials saved successfully');
       hideApiKeyModal();
+    } catch (error) {
+      console.error('Error saving API credentials:', error);
+      setHasError(true);
+      toast.error('Failed to save API credentials. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -55,15 +76,22 @@ const ApiKeyModal: React.FC = () => {
   };
   
   const handleClear = async () => {
-    setIsSubmitting(true);
-    await clearApiCredentials();
-    setKeyInput('');
-    setSecretInput('');
-    setIsSubmitting(false);
+    try {
+      setIsSubmitting(true);
+      await clearApiCredentials();
+      setKeyInput('');
+      setSecretInput('');
+      toast.success('API credentials cleared successfully');
+    } catch (error) {
+      console.error('Error clearing API credentials:', error);
+      toast.error('Failed to clear API credentials');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <Dialog open={isApiKeyModalOpen} onOpenChange={hideApiKeyModal}>
+    <Dialog open={isApiKeyModalOpen} onOpenChange={(open) => !open && hideApiKeyModal()}>
       <DialogContent className="sm:max-w-md animate-slide-up glass-card">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -116,6 +144,14 @@ const ApiKeyModal: React.FC = () => {
                 </button>
               </div>
             </div>
+            
+            {hasError && (
+              <div className="bg-destructive/10 border border-destructive/30 rounded-md p-3">
+                <p className="text-sm text-destructive">
+                  Error saving credentials. Please check your input and try again.
+                </p>
+              </div>
+            )}
             
             <div className="pt-2 flex flex-col space-y-2">
               <Button 

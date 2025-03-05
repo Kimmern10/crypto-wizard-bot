@@ -60,6 +60,9 @@ serve(async (req) => {
       console.log(`Using demo data for ${path} (${isPrivate ? 'private' : 'public'} endpoint)`);
       const mockResponse = getMockResponse(path, data);
       
+      // Add a small delay to simulate API latency and prevent UI freezing
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
       return new Response(
         JSON.stringify(mockResponse),
         { 
@@ -74,8 +77,12 @@ serve(async (req) => {
     
     // For private endpoints, ensure we have authentication
     if (isPrivate && !userId) {
+      console.log('Private endpoint request without userId, returning auth required error');
       return new Response(
-        JSON.stringify({ error: 'Authentication required for private endpoints' }),
+        JSON.stringify({ 
+          error: ['Authentication required for private endpoints'],
+          result: null
+        }),
         { 
           status: 401, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -105,32 +112,52 @@ serve(async (req) => {
       options.body = formData.toString();
     }
     
-    // Call the Kraken API
-    const { data: responseData, status } = await callKrakenApi(apiUrl, options);
-    
-    // Check for Kraken API errors
-    if (responseData && responseData.error && responseData.error.length > 0) {
-      console.error('Kraken API returned error:', responseData.error);
-      const firstError = responseData.error[0];
-      const statusCode = mapErrorToStatusCode(firstError);
+    // Call the Kraken API with a timeout
+    try {
+      const { data: responseData, status } = await callKrakenApi(apiUrl, options);
       
+      // Check for Kraken API errors
+      if (responseData && responseData.error && responseData.error.length > 0) {
+        console.error('Kraken API returned error:', responseData.error);
+        const firstError = responseData.error[0];
+        const statusCode = mapErrorToStatusCode(firstError);
+        
+        return new Response(
+          JSON.stringify(responseData),
+          { 
+            status: statusCode, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        );
+      }
+      
+      // Return the successful response
       return new Response(
         JSON.stringify(responseData),
         { 
-          status: statusCode, 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    } catch (error) {
+      console.error('Error calling Kraken API:', error);
+      
+      // Return demo data as fallback if API call fails
+      console.log(`Falling back to demo data for ${path} due to API error`);
+      const mockResponse = getMockResponse(path, data);
+      
+      return new Response(
+        JSON.stringify({
+          ...mockResponse,
+          _demoFallback: true,
+          _error: error.message
+        }),
+        { 
+          status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       );
     }
-    
-    // Return the successful response
-    return new Response(
-      JSON.stringify(responseData),
-      { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
-    );
   } catch (error) {
     console.error('Error in Kraken proxy function:', error);
     
@@ -151,7 +178,11 @@ serve(async (req) => {
     }
     
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ 
+        error: [errorMessage], 
+        result: null,
+        _isDemo: true 
+      }),
       { 
         status: statusCode, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

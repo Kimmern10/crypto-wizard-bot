@@ -50,6 +50,9 @@ export const callKrakenApi = async (
     
     console.error('Network error sending request to Kraken:', error);
     throw new Error('Network error calling Kraken API: ' + error.message);
+  } finally {
+    // Ensure timeout is cleared in all cases
+    clearTimeout(timeoutId);
   }
 };
 

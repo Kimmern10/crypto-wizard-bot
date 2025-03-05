@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -10,21 +10,40 @@ export const useApiCredentials = (
   const [apiSecret, setApiSecret] = useState<string>('');
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [isLoadingCredentials, setIsLoadingCredentials] = useState<boolean>(false);
+  const [isAuthChecked, setIsAuthChecked] = useState<boolean>(false);
 
+  // Initialize and load credentials when the hook is first used
   useEffect(() => {
-    // Først sjekk om vi allerede har en aktiv sesjon
-    const checkSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        // Hvis brukeren er logget inn, hent API-nøklene
-        loadApiCredentials();
-      } else {
-        // Hvis ikke logget inn, prøv å hente fra lokal lagring som fallback
+    const initCredentials = async () => {
+      try {
+        setIsLoadingCredentials(true);
+        
+        // First check if we have an active session
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error checking session:', error);
+          loadFromLocalStorage();
+          return;
+        }
+        
+        if (data.session) {
+          // If the user is logged in, try to fetch API keys
+          await loadApiCredentials();
+        } else {
+          // If not logged in, fall back to local storage
+          loadFromLocalStorage();
+        }
+      } catch (error) {
+        console.error('Error initializing credentials:', error);
         loadFromLocalStorage();
+      } finally {
+        setIsLoadingCredentials(false);
+        setIsAuthChecked(true);
       }
     };
 
-    checkSession();
+    initCredentials();
   }, []);
 
   const loadApiCredentials = async () => {
@@ -38,52 +57,62 @@ export const useApiCredentials = (
         .maybeSingle();
 
       if (error) {
-        console.error('Feil ved henting av API-nøkler fra Supabase:', error);
-        // Fallback til lokal lagring
+        console.error('Error fetching API keys from Supabase:', error);
+        // Fallback to local storage
         loadFromLocalStorage();
         return;
       }
 
       if (data) {
-        console.log('API-nøkler lastet fra Supabase');
+        console.log('API keys loaded from Supabase');
         setApiKey(data.api_key);
         setApiSecret(data.api_secret);
       } else {
-        // Ingen nøkler funnet i Supabase, prøv lokal lagring
+        // No keys found in Supabase, try local storage
         loadFromLocalStorage();
       }
     } catch (error) {
-      console.error('Feil ved henting av API-nøkler:', error);
+      console.error('Error fetching API keys:', error);
       loadFromLocalStorage();
     } finally {
       setIsLoadingCredentials(false);
     }
   };
 
-  const loadFromLocalStorage = () => {
-    const savedApiKey = localStorage.getItem('krakenApiKey');
-    const savedApiSecret = localStorage.getItem('krakenApiSecret');
-    
-    if (savedApiKey && savedApiSecret) {
-      console.log('API-nøkler lastet fra lokal lagring');
-      setApiKey(savedApiKey);
-      setApiSecret(savedApiSecret);
+  const loadFromLocalStorage = useCallback(() => {
+    try {
+      const savedApiKey = localStorage.getItem('krakenApiKey');
+      const savedApiSecret = localStorage.getItem('krakenApiSecret');
+      
+      if (savedApiKey && savedApiSecret) {
+        console.log('API keys loaded from local storage');
+        setApiKey(savedApiKey);
+        setApiSecret(savedApiSecret);
+      }
+    } catch (error) {
+      console.error('Error reading from local storage:', error);
     }
-  };
+  }, []);
 
   const setApiCredentials = async (key: string, secret: string) => {
+    if (!key || !secret) {
+      throw new Error('API key and secret must be provided');
+    }
+    
+    // Set in state immediately for responsiveness
     setApiKey(key);
     setApiSecret(secret);
     
-    // Lagre i lokal lagring som fallback
-    localStorage.setItem('krakenApiKey', key);
-    localStorage.setItem('krakenApiSecret', secret);
-    
     try {
-      // Sjekk om brukeren er logget inn
+      // Store in local storage as fallback
+      localStorage.setItem('krakenApiKey', key);
+      localStorage.setItem('krakenApiSecret', secret);
+      
+      // Check if the user is logged in for Supabase storage
       const { data: sessionData } = await supabase.auth.getSession();
+      
       if (sessionData.session) {
-        // Sjekk om brukeren allerede har lagrede nøkler
+        // Check if the user already has stored keys
         const { data: existingData } = await supabase
           .from('api_credentials')
           .select('id')
@@ -91,74 +120,85 @@ export const useApiCredentials = (
           .maybeSingle();
         
         if (existingData) {
-          // Oppdater eksisterende nøkler
+          // Update existing keys
           const { error } = await supabase
             .from('api_credentials')
             .update({ 
               api_key: key, 
               api_secret: secret, 
-              updated_at: new Date().toISOString() // Konverterer Date til string
+              updated_at: new Date().toISOString()
             })
             .eq('id', existingData.id);
           
           if (error) {
-            console.error('Feil ved oppdatering av API-nøkler i Supabase:', error);
-            toast.error('Feil ved lagring av API-nøkler');
-          } else {
-            console.log('API-nøkler oppdatert i Supabase');
+            console.error('Error updating API keys in Supabase:', error);
+            throw new Error('Failed to update API keys: ' + error.message);
           }
+          
+          console.log('API keys updated in Supabase');
         } else {
-          // Sett inn nye nøkler
+          // Insert new keys
           const { error } = await supabase
             .from('api_credentials')
             .insert({
-              user_id: sessionData.session.user.id, // Legg til user_id
+              user_id: sessionData.session.user.id,
               exchange: 'kraken',
               api_key: key,
               api_secret: secret
             });
           
           if (error) {
-            console.error('Feil ved innsetting av API-nøkler i Supabase:', error);
-            toast.error('Feil ved lagring av API-nøkler');
-          } else {
-            console.log('API-nøkler lagret i Supabase');
+            console.error('Error inserting API keys in Supabase:', error);
+            throw new Error('Failed to save API keys: ' + error.message);
           }
+          
+          console.log('API keys saved in Supabase');
         }
       }
+      
+      // Call onConnect callback if provided
+      if (onConnect) {
+        await onConnect();
+      }
+      
     } catch (error) {
-      console.error('Feil ved lagring av API-nøkler:', error);
-      toast.error('Feil ved lagring av API-nøkler');
+      console.error('Error storing API keys:', error);
+      throw error;
     }
   };
 
   const clearApiCredentials = async () => {
-    setApiKey('');
-    setApiSecret('');
-    localStorage.removeItem('krakenApiKey');
-    localStorage.removeItem('krakenApiSecret');
-    
     try {
-      // Sjekk om brukeren er logget inn
+      // Clear from state first for responsiveness
+      setApiKey('');
+      setApiSecret('');
+      
+      // Clear from local storage
+      localStorage.removeItem('krakenApiKey');
+      localStorage.removeItem('krakenApiSecret');
+      
+      // Check if the user is logged in
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData.session) {
-        // Slett nøkler fra Supabase
+        // Delete keys from Supabase
         const { error } = await supabase
           .from('api_credentials')
           .delete()
           .eq('exchange', 'kraken');
         
         if (error) {
-          console.error('Feil ved sletting av API-nøkler fra Supabase:', error);
-        } else {
-          console.log('API-nøkler slettet fra Supabase');
+          console.error('Error deleting API keys from Supabase:', error);
+          throw new Error('Failed to delete API keys: ' + error.message);
         }
+        
+        console.log('API keys deleted from Supabase');
       }
+      
+      return true;
     } catch (error) {
-      console.error('Feil ved sletting av API-nøkler:', error);
+      console.error('Error clearing API keys:', error);
+      throw error;
     }
-    
-    toast.info('API-nøkler fjernet');
   };
 
   const showApiKeyModal = () => setIsApiKeyModalOpen(true);
@@ -170,6 +210,7 @@ export const useApiCredentials = (
     isApiConfigured: !!(apiKey && apiSecret),
     isApiKeyModalOpen,
     isLoadingCredentials,
+    isAuthChecked,
     setApiCredentials,
     clearApiCredentials,
     showApiKeyModal,
