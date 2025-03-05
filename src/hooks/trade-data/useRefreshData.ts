@@ -1,6 +1,7 @@
 
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import { getConnectionStatus } from '@/utils/websocketManager';
 
 /**
  * A hook for refreshing trade data from the Kraken API.
@@ -21,8 +22,14 @@ export const useRefreshData = (
   } = tradeDataState;
 
   return useCallback(async () => {
-    if (!krakenApi.isConnected) {
+    // Check the actual WebSocket connection status (including demo mode)
+    const { isConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!isConnected && !isDemoMode && !krakenApi.isConnected) {
       console.warn('Cannot refresh data: Kraken API not connected');
+      toast.error('Cannot refresh data', {
+        description: 'API connection is not established. Try restarting the connection.'
+      });
       return;
     }
 

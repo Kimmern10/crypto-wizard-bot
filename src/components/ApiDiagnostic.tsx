@@ -11,13 +11,14 @@ import {
   RefreshCw,
   Server,
   ExternalLink,
-  KeyRound
+  KeyRound,
+  ArrowRightLeft
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTradingContext } from '@/hooks/useTradingContext';
 
 const ApiDiagnostic: React.FC = () => {
-  const { apiKey, showApiKeyModal } = useTradingContext();
+  const { apiKey, showApiKeyModal, isConnected } = useTradingContext();
   const [isRunningCheck, setIsRunningCheck] = useState(false);
   const [diagnosticResults, setDiagnosticResults] = useState<{
     wsConnected: boolean;
@@ -72,6 +73,22 @@ const ApiDiagnostic: React.FC = () => {
     runDiagnostics();
   }, []);
 
+  // Add a way to attempt a connection if not connected
+  const attemptConnection = async () => {
+    const { restartConnection } = useTradingContext();
+    if (restartConnection) {
+      try {
+        toast.info('Attempting to restart connection...');
+        await restartConnection();
+        // Re-run diagnostics to update status
+        setTimeout(() => runDiagnostics(), 1500);
+      } catch (error) {
+        console.error('Failed to restart connection:', error);
+        toast.error('Connection restart failed');
+      }
+    }
+  };
+
   return (
     <Card className="overflow-hidden">
       <CardHeader className="pb-2">
@@ -99,7 +116,18 @@ const ApiDiagnostic: React.FC = () => {
             {diagnosticResults.wsConnected ? (
               <CheckCircle className="h-5 w-5 text-green-500" />
             ) : (
-              <XCircle className="h-5 w-5 text-red-500" />
+              <div className="flex items-center gap-2">
+                <XCircle className="h-5 w-5 text-red-500" />
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-7 text-xs py-0" 
+                  onClick={attemptConnection}
+                >
+                  <ArrowRightLeft className="h-3 w-3 mr-1" />
+                  Reconnect
+                </Button>
+              </div>
             )}
           </div>
           
