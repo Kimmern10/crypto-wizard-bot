@@ -5,9 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useTradingContext } from '@/hooks/useTradingContext';
-import { AlertCircle, KeyRound, EyeOff, Eye, Loader2 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { AlertCircle, KeyRound, EyeOff, Eye, Loader2, Info } from 'lucide-react';
 import { toast } from 'sonner';
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const ApiKeyModal: React.FC = () => {
   const { 
@@ -17,57 +17,79 @@ const ApiKeyModal: React.FC = () => {
     apiKey, 
     apiSecret, 
     clearApiCredentials,
-    isLoadingCredentials 
+    isLoadingCredentials,
+    isAuthenticated,
+    error: apiError
   } = useTradingContext();
   
   const [keyInput, setKeyInput] = useState('');
   const [secretInput, setSecretInput] = useState('');
   const [showSecret, setShowSecret] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [connectionTimeout, setConnectionTimeout] = useState<NodeJS.Timeout | null>(null);
 
   // Reset state when modal opens or changes
   useEffect(() => {
     if (isApiKeyModalOpen) {
-      checkAuthStatus();
       // Use values from context, but don't cause infinite rerenders
       setKeyInput(apiKey || '');
       setSecretInput(apiSecret || '');
-      setHasError(false);
+      setLocalError(null);
     }
-  }, [isApiKeyModalOpen]);
+    
+    // Clear any existing timeout when modal opens/closes
+    return () => {
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+      }
+    };
+  }, [isApiKeyModalOpen, apiKey, apiSecret]);
 
-  const checkAuthStatus = async () => {
-    try {
-      const { data } = await supabase.auth.getSession();
-      setIsLoggedIn(!!data.session);
-    } catch (error) {
-      console.error('Error checking auth status:', error);
-      setIsLoggedIn(false);
+  // Show any API errors in the modal
+  useEffect(() => {
+    if (apiError && isApiKeyModalOpen) {
+      setLocalError(apiError);
     }
-  };
+  }, [apiError, isApiKeyModalOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setHasError(false);
+    setLocalError(null);
     
     if (!keyInput || !secretInput) {
-      toast.error('Both API key and secret are required');
+      setLocalError('Both API key and secret are required');
       return;
     }
 
     try {
       setIsSubmitting(true);
+      
+      // Set a timeout to detect if the operation is taking too long
+      const timeout = setTimeout(() => {
+        toast.warning('Connection is taking longer than expected', {
+          description: 'Please be patient, or try again later.'
+        });
+      }, 5000);
+      
+      setConnectionTimeout(timeout);
+      
       await setApiCredentials(keyInput, secretInput);
+      
+      // Clear the timeout on success
+      clearTimeout(timeout);
+      
       toast.success('API credentials saved successfully');
       hideApiKeyModal();
     } catch (error) {
       console.error('Error saving API credentials:', error);
-      setHasError(true);
+      setLocalError(error instanceof Error ? error.message : 'Failed to save API credentials');
       toast.error('Failed to save API credentials. Please try again.');
     } finally {
       setIsSubmitting(false);
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+      }
     }
   };
 
@@ -84,6 +106,7 @@ const ApiKeyModal: React.FC = () => {
       toast.success('API credentials cleared successfully');
     } catch (error) {
       console.error('Error clearing API credentials:', error);
+      setLocalError(error instanceof Error ? error.message : 'Failed to clear API credentials');
       toast.error('Failed to clear API credentials');
     } finally {
       setIsSubmitting(false);
@@ -110,6 +133,13 @@ const ApiKeyModal: React.FC = () => {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 py-4">
+            {localError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{localError}</AlertDescription>
+              </Alert>
+            )}
+            
             <div className="space-y-2">
               <Label htmlFor="api-key">API Key</Label>
               <Input
@@ -145,14 +175,6 @@ const ApiKeyModal: React.FC = () => {
               </div>
             </div>
             
-            {hasError && (
-              <div className="bg-destructive/10 border border-destructive/30 rounded-md p-3">
-                <p className="text-sm text-destructive">
-                  Error saving credentials. Please check your input and try again.
-                </p>
-              </div>
-            )}
-            
             <div className="pt-2 flex flex-col space-y-2">
               <Button 
                 type="submit" 
@@ -185,16 +207,16 @@ const ApiKeyModal: React.FC = () => {
               )}
             </div>
             
-            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-md p-3 flex items-start space-x-2">
-              <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-              <div className="text-sm text-amber-800 dark:text-amber-300">
-                {isLoggedIn ? (
+            <Alert variant={isAuthenticated ? "default" : "warning"} className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-md">
+              <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <AlertDescription className="text-sm text-amber-800 dark:text-amber-300">
+                {isAuthenticated ? (
                   <p>Your API credentials will be stored securely in your account and synchronized between devices.</p>
                 ) : (
-                  <p>Your API credentials are stored locally in your browser's storage. Log in to save them securely and access from multiple devices.</p>
+                  <p>You are not logged in. API credentials will only be stored locally in your browser. <a href="/auth" className="underline">Sign in</a> to save them securely.</p>
                 )}
-              </div>
-            </div>
+              </AlertDescription>
+            </Alert>
           </form>
         )}
       </DialogContent>

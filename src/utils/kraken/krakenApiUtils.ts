@@ -54,11 +54,18 @@ export const krakenRequest = async <T>(
  */
 export const clearApiCache = (): void => {
   console.log('Clearing API cache...');
-  // In a real implementation, this would clear any cached API responses
-  // For now, this is just a placeholder function to fix the build error
-  
-  // You could implement actual cache clearing logic here if needed
+  // Clear local storage cache
   localStorage.removeItem('krakenApiCache');
+  localStorage.removeItem('krakenLastPrices');
+  localStorage.removeItem('krakenLastBalance');
+  localStorage.removeItem('krakenLastPositions');
+  localStorage.removeItem('krakenLastTradeHistory');
+  
+  // Clear any session storage cache as well
+  sessionStorage.removeItem('krakenApiCache');
+  
+  // Any other cache clearing logic would go here
+  console.log('API cache cleared');
 };
 
 /**
@@ -127,4 +134,43 @@ export const processTradesData = (tradesData: any): any[] => {
     time: trade.time || Date.now()/1000
   }))
   .sort((a, b) => b.time - a.time); // Sort by time, newest first
+};
+
+/**
+ * Gets the current authentication status for the trading API
+ */
+export const getAuthenticationStatus = async (): Promise<{ isAuthenticated: boolean, hasApiKeys: boolean }> => {
+  try {
+    // Check if user is authenticated with Supabase
+    const { data } = await supabase.auth.getSession();
+    const isAuthenticated = !!data.session;
+    
+    // Check if API keys exist in either localStorage or Supabase
+    const localApiKey = localStorage.getItem('krakenApiKey');
+    const localApiSecret = localStorage.getItem('krakenApiSecret');
+    const hasLocalKeys = !!(localApiKey && localApiSecret);
+    
+    let hasDbKeys = false;
+    
+    // If authenticated, check for API keys in database
+    if (isAuthenticated) {
+      const { data, error } = await supabase
+        .from('api_credentials')
+        .select('id')
+        .eq('exchange', 'kraken')
+        .maybeSingle();
+        
+      if (!error && data) {
+        hasDbKeys = true;
+      }
+    }
+    
+    const hasApiKeys = hasLocalKeys || hasDbKeys;
+    
+    return { isAuthenticated, hasApiKeys };
+  } catch (error) {
+    console.error('Error checking authentication status:', error);
+    // Assume worst case for safety
+    return { isAuthenticated: false, hasApiKeys: false };
+  }
 };

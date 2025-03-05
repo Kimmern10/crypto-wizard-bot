@@ -1,6 +1,7 @@
 
 import React, { createContext, useState, useContext } from 'react';
 import { OrderParams } from '@/types/krakenApiTypes';
+import { User } from '@supabase/supabase-js';
 
 export interface TradingContextType {
   apiKey: string;
@@ -17,8 +18,8 @@ export interface TradingContextType {
   connect: () => Promise<void>;
   showApiKeyModal: () => void;
   hideApiKeyModal: () => void;
-  setApiCredentials: (apiKey: string, apiSecret: string) => void;
-  clearApiCredentials: () => void;
+  setApiCredentials: (apiKey: string, apiSecret: string) => Promise<boolean>;
+  clearApiCredentials: () => Promise<boolean>;
   refreshData: () => Promise<void>;
   restartConnection: () => Promise<void>;
   sendOrder: (params: OrderParams) => Promise<any>;
@@ -44,6 +45,8 @@ export interface TradingContextType {
   isRefreshing: boolean;
   dailyChangePercent: number;
   overallProfitLoss: number;
+  isAuthenticated: boolean;
+  user: User | null;
 }
 
 const defaultTradingContext: TradingContextType = {
@@ -61,8 +64,8 @@ const defaultTradingContext: TradingContextType = {
   connect: async () => {},
   showApiKeyModal: () => {},
   hideApiKeyModal: () => {},
-  setApiCredentials: () => {},
-  clearApiCredentials: () => {},
+  setApiCredentials: async () => false,
+  clearApiCredentials: async () => false,
   refreshData: async () => {},
   restartConnection: async () => {},
   sendOrder: async () => ({}),
@@ -107,7 +110,9 @@ const defaultTradingContext: TradingContextType = {
   lastDataRefresh: null,
   isRefreshing: false,
   dailyChangePercent: 0,
-  overallProfitLoss: 0
+  overallProfitLoss: 0,
+  isAuthenticated: false,
+  user: null
 };
 
 const TradingContext = createContext<TradingContextType>(defaultTradingContext);
