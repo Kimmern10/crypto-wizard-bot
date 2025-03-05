@@ -1,6 +1,4 @@
 
-import { useFetchInitialData } from './useFetchInitialData';
-import { useRefreshData } from './useRefreshData';
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { getConnectionStatus } from '@/utils/websocketManager';
@@ -20,27 +18,95 @@ export const useTradeDataFetching = (
   const [lastRefreshTime, setLastRefreshTime] = useState<number | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   
-  // Use the specialized hooks for initial data fetching and refreshing
-  const fetchInitialData = useFetchInitialData(krakenApi, tradeDataState);
-  const refreshDataFn = useRefreshData(krakenApi, tradeDataState);
-
   // Combined function to fetch all initial data
   const fetchData = useCallback(async () => {
     try {
+      // Get WebSocket connection status
+      const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+      
+      // Allow fetching if either API or WebSocket is connected or in demo mode
+      const canFetch = krakenApi.isConnected || wsConnected || isDemoMode;
+      
+      if (!canFetch) {
+        console.warn('Cannot fetch data: No API or WebSocket connection');
+        toast.error('Cannot fetch data', {
+          description: 'No connection to Kraken API. Try connecting first.'
+        });
+        throw new Error('No API or WebSocket connection');
+      }
+      
       setIsRefreshing(true);
       console.log('Fetching initial trade data...');
-      await fetchInitialData();
+      
+      let successCount = 0;
+      let failCount = 0;
+      
+      // Function to safely execute API calls with error handling
+      const safeApiCall = async (operation: string, apiCall: () => Promise<any>, setter: (data: any) => void) => {
+        try {
+          console.log(`Fetching ${operation}...`);
+          const data = await apiCall();
+          if (data) {
+            setter(data);
+            console.log(`${operation} updated successfully`);
+            successCount++;
+            return data;
+          }
+          failCount++;
+          return null;
+        } catch (error) {
+          console.error(`Error fetching ${operation}:`, error);
+          failCount++;
+          return null;
+        }
+      };
+      
+      // Fetch all data in parallel for efficiency
+      await Promise.all([
+        // Fetch balance
+        safeApiCall(
+          'account balance', 
+          () => krakenApi.fetchBalance(),
+          tradeDataState.setCurrentBalance
+        ),
+        
+        // Fetch positions
+        safeApiCall(
+          'open positions',
+          () => krakenApi.fetchOpenPositions(),
+          tradeDataState.setActivePositions
+        ),
+        
+        // Fetch trade history
+        safeApiCall(
+          'trade history',
+          () => krakenApi.fetchTradeHistory(),
+          tradeDataState.setTradeHistory
+        )
+      ]);
+      
       setLastRefreshTime(Date.now());
       setRefreshError(null);
-      toast.success('Trade data loaded successfully');
+      
+      // Evaluate overall success
+      if (failCount > 0 && successCount === 0) {
+        toast.error('Failed to fetch any data');
+        throw new Error('All data fetches failed');
+      } else if (failCount > 0) {
+        toast.warning('Some data could not be fetched', {
+          description: 'Check your connection and try refreshing again.'
+        });
+      } else {
+        toast.success('Data loaded successfully');
+      }
     } catch (error) {
       console.error('Error fetching initial trade data:', error);
       setRefreshError(error instanceof Error ? error.message : 'Unknown error');
-      toast.error('Failed to load trade data');
+      throw error;
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchInitialData]);
+  }, [krakenApi, tradeDataState]);
 
   // Wrapper for the refresh function that includes loading state
   const refreshData = useCallback(async () => {
@@ -59,7 +125,7 @@ export const useTradeDataFetching = (
     
     try {
       setIsRefreshing(true);
-      await refreshDataFn();
+      await fetchData();
       setLastRefreshTime(Date.now());
       setRefreshError(null);
     } catch (error) {
@@ -69,7 +135,7 @@ export const useTradeDataFetching = (
     } finally {
       setIsRefreshing(false);
     }
-  }, [refreshDataFn, isRefreshing, lastRefreshTime]);
+  }, [fetchData, isRefreshing, lastRefreshTime]);
   
   // Auto-refresh data periodically when connected
   useEffect(() => {

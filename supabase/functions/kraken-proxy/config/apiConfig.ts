@@ -1,21 +1,17 @@
 
 // Kraken API configuration
-export const API_URL = 'https://api.kraken.com';
-export const API_VERSION = '0';
 
-// Rate limiting configuration
-export const RATE_LIMITS = {
-  // Limits per IP address
-  ip: {
-    perMinute: 30,
-    perHour: 300
-  },
-  // Limits per user ID
-  user: {
-    perMinute: 60,
-    perHour: 600
-  }
-};
+// API base URL
+export const API_URL = "https://api.kraken.com";
 
-// Request timeout in milliseconds
-export const REQUEST_TIMEOUT = 30000;
+// API version
+export const API_VERSION = "0";
+
+// Request timeout in milliseconds (10 seconds)
+export const REQUEST_TIMEOUT = 10000;
+
+// Maximum retries for failed requests
+export const MAX_RETRIES = 2;
+
+// Delay between retries in milliseconds
+export const RETRY_DELAY = 1000;

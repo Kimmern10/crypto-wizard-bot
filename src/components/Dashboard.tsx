@@ -4,6 +4,7 @@ import { useTradingContext } from '@/hooks/useTradingContext';
 import { toast } from "sonner";
 import DashboardLayout from './dashboard/DashboardLayout';
 import { Loader2 } from 'lucide-react';
+import { useConnectionState } from '@/hooks/useConnectionState';
 
 const Dashboard: React.FC = () => {
   const { 
@@ -24,6 +25,15 @@ const Dashboard: React.FC = () => {
     dailyChangePercent
   } = useTradingContext();
   
+  // Use the enhanced connection state hook
+  const { 
+    isInitializing, 
+    isRestarting, 
+    wsConnected, 
+    isDemoMode, 
+    proxyAvailable 
+  } = useConnectionState();
+  
   const [isDemo, setIsDemo] = useState(false);
   const [corsBlocked, setCorsBlocked] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,43 +52,51 @@ const Dashboard: React.FC = () => {
 
   // Format timestamp for last refresh
   const formattedLastRefresh = lastDataRefresh 
-    ? lastDataRefresh.toLocaleTimeString() 
+    ? (lastDataRefresh instanceof Date ? lastDataRefresh.toLocaleTimeString() : 'Unknown format')
     : 'Never';
 
   // Check if we're in demo mode or real mode
   useEffect(() => {
-    if (Object.keys(lastTickerData).length > 0) {
-      console.log('Received ticker data for pairs:', Object.keys(lastTickerData).join(', '));
-      
-      // If we have ticker data and connectionStatus contains "Demo", mark as demo
-      if (connectionStatus.toLowerCase().includes('demo')) {
-        setIsDemo(true);
-      }
+    // Update the demo state based on the connection status and WebSocket state
+    if (isDemoMode || connectionStatus.toLowerCase().includes('demo')) {
+      setIsDemo(true);
+    } else {
+      setIsDemo(false);
     }
     
     // Check for CORS issues in the connection status
-    if (connectionStatus.toLowerCase().includes('cors')) {
+    if (
+      connectionStatus.toLowerCase().includes('cors') || 
+      (proxyAvailable === false && !isConnected)
+    ) {
       setCorsBlocked(true);
       setIsDemo(true);
+    } else {
+      setCorsBlocked(false);
     }
-    
-    // If the current status indicates failure or error, we might be in demo mode
-    if (connectionStatus.toLowerCase().includes('failed') || 
-        connectionStatus.toLowerCase().includes('error')) {
-      setIsDemo(true);
-    }
-  }, [lastTickerData, connectionStatus]);
+  }, [lastTickerData, connectionStatus, isDemoMode, isConnected, proxyAvailable]);
   
   // Debug connection status
   useEffect(() => {
     console.log('Dashboard detected connection status:', isConnected ? 'Connected' : 'Disconnected');
     console.log('API configuration status:', isApiConfigured ? 'Configured' : 'Not configured');
     console.log('Current connection status:', connectionStatus);
+    console.log('WebSocket connected:', wsConnected ? 'Yes' : 'No');
+    console.log('Demo mode:', isDemoMode ? 'Yes' : 'No');
+    console.log('Proxy available:', proxyAvailable === null ? 'Unknown' : proxyAvailable ? 'Yes' : 'No');
     
     if (isApiConfigured && apiKey) {
       console.log('API key is present, first 4 characters:', apiKey.substring(0, 4) + '...');
     }
-  }, [isConnected, isApiConfigured, connectionStatus, apiKey]);
+  }, [
+    isConnected, 
+    isApiConfigured, 
+    connectionStatus, 
+    apiKey, 
+    wsConnected, 
+    isDemoMode, 
+    proxyAvailable
+  ]);
 
   // Handle refresh button click with better state management
   const handleRefresh = () => {
@@ -108,6 +126,11 @@ const Dashboard: React.FC = () => {
     restartConnection()
       .then(() => {
         toast.success('Connection restarted successfully');
+        // After successful reconnection, refresh data
+        return refreshData();
+      })
+      .then(() => {
+        toast.success('Data refreshed after reconnection');
       })
       .catch((error) => {
         console.error('Error restarting connection:', error);
@@ -121,11 +144,13 @@ const Dashboard: React.FC = () => {
   };
 
   // Show loading state while initially loading
-  if (isLoading && !isRefreshing && !refreshing && !attemptingReconnect) {
+  if ((isLoading && !isRefreshing && !refreshing && !attemptingReconnect) || isInitializing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-        <p className="text-muted-foreground text-sm">Loading dashboard data...</p>
+        <p className="text-muted-foreground text-sm">
+          {isInitializing ? 'Initializing connection...' : 'Loading dashboard data...'}
+        </p>
         {error && (
           <p className="text-destructive text-xs mt-2">{error}</p>
         )}
@@ -135,7 +160,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <DashboardLayout
-      isConnected={isConnected}
+      isConnected={isConnected || wsConnected}
       isDemo={isDemo}
       corsBlocked={corsBlocked}
       connectionStatus={connectionStatus}
@@ -144,7 +169,7 @@ const Dashboard: React.FC = () => {
       lastTickerData={lastTickerData}
       totalBalanceUSD={totalBalanceUSD}
       dailyChangePercent={dailyChangePercent}
-      refreshing={refreshing || isRefreshing}
+      refreshing={refreshing || isRefreshing || isRestarting}
       attemptingReconnect={attemptingReconnect}
       onRefresh={handleRefresh}
       onReconnect={handleReconnect}

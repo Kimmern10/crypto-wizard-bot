@@ -16,20 +16,33 @@ export const checkWebSocketConnection = async (): Promise<boolean> => {
     return new Promise((resolve) => {
       // Set a timeout in case the connection hangs
       const timeout = setTimeout(() => {
-        socket.close();
+        try {
+          socket.close();
+        } catch (e) {
+          // Ignore error on timeout
+        }
         console.log('WebSocket connection test timed out');
         resolve(false);
       }, 5000);
       
       socket.onopen = () => {
         clearTimeout(timeout);
-        socket.close();
+        try {
+          socket.close();
+        } catch (e) {
+          // Ignore error on close
+        }
         console.log('Direct WebSocket connection to Kraken is possible');
         resolve(true);
       };
       
       socket.onerror = (error) => {
         clearTimeout(timeout);
+        try {
+          socket.close();
+        } catch (e) {
+          // Ignore error on close after error
+        }
         console.error('WebSocket connection test failed:', error);
         resolve(false);
       };
@@ -82,33 +95,29 @@ export const checkProxyFunction = async (): Promise<boolean> => {
     console.log('Testing Kraken API proxy connection...');
     const startTime = Date.now();
     
-    // Track proxy health and latency
-    let proxyLatency = 0;
-    let proxyHealth = false;
-    
-    // Call the health endpoint of our Kraken proxy function with a timeout
+    // Add a timeout promise to prevent hanging
     const timeoutPromise = new Promise<{data: null, error: Error}>((resolve) => {
       setTimeout(() => {
         resolve({
           data: null, 
-          error: new Error('Proxy health check timed out after 10 seconds')
+          error: new Error('Proxy health check timed out after 8 seconds')
         });
-      }, 10000);
+      }, 8000);
     });
     
+    // Actual proxy call
     const proxyPromise = supabase.functions.invoke('kraken-proxy', {
       body: { 
         path: 'health', 
         method: 'GET', 
-        isPrivate: false,
-        health: 'check'
+        isPrivate: false
       }
     });
     
     // Race the proxy call against the timeout
     const { data, error } = await Promise.race([proxyPromise, timeoutPromise]);
     
-    proxyLatency = Date.now() - startTime;
+    const proxyLatency = Date.now() - startTime;
     console.log(`Proxy response time: ${proxyLatency}ms`);
     
     if (error) {
@@ -122,15 +131,14 @@ export const checkProxyFunction = async (): Promise<boolean> => {
     }
     
     // Successfully received health check response
-    proxyHealth = true;
     console.log('Kraken proxy is available:', data);
     
-    // If latency is too high, consider the proxy as degraded
+    // If latency is too high, log a warning but still consider it available
     if (proxyLatency > 5000) {
       console.warn(`Proxy latency is high (${proxyLatency}ms), service may be degraded`);
     }
     
-    return proxyHealth;
+    return true;
   } catch (error) {
     console.error('Error checking proxy function:', error);
     return false;
