@@ -21,7 +21,10 @@ export const connectAndSubscribe = (
   console.log('Attempting to connect to Kraken WebSocket...');
   
   // First check if the Kraken proxy is working
+  const proxyCheckTime = Date.now();
   checkProxyFunction().then(proxyAvailable => {
+    console.log(`Proxy check completed in ${Date.now() - proxyCheckTime}ms`);
+    
     if (!proxyAvailable) {
       console.warn('Kraken proxy function is not available. API operations will be limited.');
       toast.warning('Kraken API proxy unavailable. Some features may not work.', {

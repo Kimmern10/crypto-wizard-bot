@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { checkWebSocketStatus, checkKrakenProxyStatus } from '@/utils/websocketManager';
+import { checkWebSocketStatus, checkKrakenProxyStatus, restartWebSocket } from '@/utils/websocketManager';
 import { supabase } from '@/integrations/supabase/client';
 import { 
   CheckCircle, 
@@ -20,34 +19,55 @@ import { useTradingContext } from '@/hooks/useTradingContext';
 const ApiDiagnostic: React.FC = () => {
   const { apiKey, showApiKeyModal, isConnected } = useTradingContext();
   const [isRunningCheck, setIsRunningCheck] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [diagnosticResults, setDiagnosticResults] = useState<{
     wsConnected: boolean;
     isDemoMode: boolean;
     proxyAvailable: boolean;
     apiKeyConfigured: boolean;
     edgeFunctionDeployed: boolean;
+    lastChecked: number;
   }>({
     wsConnected: false,
     isDemoMode: false,
     proxyAvailable: false,
     apiKeyConfigured: false,
-    edgeFunctionDeployed: false
+    edgeFunctionDeployed: false,
+    lastChecked: 0
   });
 
   const runDiagnostics = async () => {
     setIsRunningCheck(true);
     try {
+      console.log('Running API diagnostics...');
+      const startTime = Date.now();
+      
       const wsStatus = checkWebSocketStatus();
+      console.log('WebSocket status:', wsStatus);
+      
+      // Check proxy status
+      const proxyCheckStart = Date.now();
       const proxyAvailable = await checkKrakenProxyStatus();
+      console.log(`Proxy check completed in ${Date.now() - proxyCheckStart}ms`);
       
       // Check if edge function exists by making a call to it
       let edgeFunctionDeployed = false;
       try {
+        const functionCheckStart = Date.now();
         const { data, error } = await supabase.functions.invoke('kraken-proxy', {
-          body: { path: 'public/Time', method: 'GET', isPrivate: false }
+          body: { path: 'health', method: 'GET', isPrivate: false, health: 'check' }
         });
+        
+        console.log(`Edge function health check completed in ${Date.now() - functionCheckStart}ms`);
         edgeFunctionDeployed = !error && !!data;
+        
+        if (error) {
+          console.error('Edge function health check failed:', error);
+        } else {
+          console.log('Edge function health check response:', data);
+        }
       } catch (e) {
+        console.error('Error checking edge function:', e);
         edgeFunctionDeployed = false;
       }
       
@@ -56,9 +76,11 @@ const ApiDiagnostic: React.FC = () => {
         isDemoMode: wsStatus.isDemoMode,
         proxyAvailable,
         apiKeyConfigured: !!apiKey,
-        edgeFunctionDeployed
+        edgeFunctionDeployed,
+        lastChecked: Date.now()
       });
       
+      console.log(`Diagnostics completed in ${Date.now() - startTime}ms`);
       toast.success('Diagnostic check complete');
     } catch (error) {
       console.error('Error running diagnostics:', error);
@@ -75,17 +97,20 @@ const ApiDiagnostic: React.FC = () => {
 
   // Add a way to attempt a connection if not connected
   const attemptConnection = async () => {
-    const { restartConnection } = useTradingContext();
-    if (restartConnection) {
-      try {
-        toast.info('Attempting to restart connection...');
-        await restartConnection();
-        // Re-run diagnostics to update status
-        setTimeout(() => runDiagnostics(), 1500);
-      } catch (error) {
-        console.error('Failed to restart connection:', error);
-        toast.error('Connection restart failed');
-      }
+    try {
+      setIsReconnecting(true);
+      toast.info('Attempting to restart connection...');
+      console.log('Manually restarting WebSocket connection...');
+      
+      await restartWebSocket();
+      
+      // Re-run diagnostics to update status after a short delay
+      setTimeout(() => runDiagnostics(), 1500);
+    } catch (error) {
+      console.error('Failed to restart connection:', error);
+      toast.error('Connection restart failed');
+    } finally {
+      setIsReconnecting(false);
     }
   };
 
@@ -123,9 +148,10 @@ const ApiDiagnostic: React.FC = () => {
                   size="sm" 
                   className="h-7 text-xs py-0" 
                   onClick={attemptConnection}
+                  disabled={isReconnecting}
                 >
-                  <ArrowRightLeft className="h-3 w-3 mr-1" />
-                  Reconnect
+                  <ArrowRightLeft className={`h-3 w-3 mr-1 ${isReconnecting ? 'animate-spin' : ''}`} />
+                  {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
                 </Button>
               </div>
             )}
@@ -189,6 +215,13 @@ const ApiDiagnostic: React.FC = () => {
               </Button>
             )}
           </div>
+          
+          {/* Last Checked Timestamp */}
+          {diagnosticResults.lastChecked > 0 && (
+            <div className="text-xs text-muted-foreground text-right pt-1">
+              Last checked: {new Date(diagnosticResults.lastChecked).toLocaleTimeString()}
+            </div>
+          )}
         </div>
         
         {/* Recommendations based on diagnostic results */}

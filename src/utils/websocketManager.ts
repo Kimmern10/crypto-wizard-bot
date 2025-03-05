@@ -19,8 +19,10 @@ let isProxyAvailable = false;
 export const checkKrakenProxyStatus = async (): Promise<boolean> => {
   console.log('Checking Kraken proxy status...');
   try {
+    const proxyCheckStart = Date.now();
     isProxyAvailable = await checkProxyFunction();
-    console.log(`Proxy check result: ${isProxyAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}`);
+    const proxyCheckTime = Date.now() - proxyCheckStart;
+    console.log(`Proxy check completed in ${proxyCheckTime}ms: ${isProxyAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}`);
     return isProxyAvailable;
   } catch (error) {
     console.error('Error checking proxy status:', error);
