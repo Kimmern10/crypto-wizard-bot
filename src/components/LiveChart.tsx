@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { getKrakenWebSocket, getConnectionStatus, type WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
-import { ArrowUp, ArrowDown, Clock, Activity, RefreshCw } from 'lucide-react';
+import { ArrowUp, ArrowDown, Clock, Activity, RefreshCw, WifiOff, Wifi } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PriceDataPoint {
@@ -33,6 +33,7 @@ const LiveChart: React.FC = () => {
   const [selectedPair, setSelectedPair] = useState<string>('XBT/USD');
   const [availablePairs, setAvailablePairs] = useState<string[]>(['XBT/USD', 'ETH/USD', 'XRP/USD', 'DOT/USD', 'ADA/USD']);
   const [activeTimeRange, setActiveTimeRange] = useState<string>(initialTimeRanges[1]);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('initializing');
   
   const [chartState, setChartState] = useState<ChartState>({
     data: [],
@@ -131,17 +132,30 @@ const LiveChart: React.FC = () => {
     const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
     
     if (!wsConnected && !isDemoMode) {
+      console.log('No WebSocket connection, generating demo data');
+      setSubscriptionStatus('disconnected');
       generateDemoData(selectedPair);
       return;
     }
     
     console.log(`Setting up subscription for ${selectedPair} (Demo mode: ${isDemoMode})`);
+    setSubscriptionStatus('subscribing');
     
     const wsManager = getKrakenWebSocket();
     
     const handleTickerUpdate = (message: WebSocketMessage) => {
       if (message.type === 'ticker' && message.data.pair === selectedPair) {
         updateChartWithTickerData(message.data, selectedPair);
+        setSubscriptionStatus('active');
+      } else if (message.type === 'subscriptionStatus') {
+        if (message.data.status === 'subscribed' && message.data.pair === selectedPair) {
+          setSubscriptionStatus('active');
+        } else if (message.data.status === 'error') {
+          setSubscriptionStatus('error');
+          toast.error(`Subscription error: ${message.data.errorMessage || 'Unknown error'}`);
+        }
+      } else if (message.type === 'error') {
+        setSubscriptionStatus('error');
       }
     };
     
@@ -316,6 +330,9 @@ const LiveChart: React.FC = () => {
     
     const wsManager = getKrakenWebSocket();
     
+    setSubscriptionStatus('resubscribing');
+    
+    // Safely unsubscribe first
     wsManager.send({
       event: "unsubscribe",
       pair: [selectedPair],
@@ -332,8 +349,49 @@ const LiveChart: React.FC = () => {
           name: "ticker"
         }
       });
+      
       toast.success(`Oppdaterer data for ${selectedPair}`);
-    }, 300);
+    }, 500);
+  };
+  
+  // Function to get status indication color
+  const getStatusColor = () => {
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) return "bg-red-100 text-red-800";
+    if (isDemoMode) return "bg-amber-100 text-amber-800";
+    if (subscriptionStatus === 'active') return "bg-green-100 text-green-800";
+    if (subscriptionStatus === 'error') return "bg-red-100 text-red-800";
+    if (subscriptionStatus === 'subscribing' || subscriptionStatus === 'resubscribing') 
+      return "bg-blue-100 text-blue-800";
+    
+    return "bg-gray-100 text-gray-800";
+  };
+  
+  // Function to get status icon
+  const StatusIcon = () => {
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) return <WifiOff className="h-3 w-3 mr-1" />;
+    if (subscriptionStatus === 'active' || isDemoMode) return <Wifi className="h-3 w-3 mr-1" />;
+    if (subscriptionStatus === 'subscribing' || subscriptionStatus === 'resubscribing') 
+      return <RefreshCw className="h-3 w-3 mr-1 animate-spin" />;
+    
+    return <WifiOff className="h-3 w-3 mr-1" />;
+  };
+  
+  // Function to get status text
+  const getStatusText = () => {
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) return "Ikke tilkoblet";
+    if (isDemoMode) return "Demo Modus";
+    if (subscriptionStatus === 'active') return "Tilkoblet";
+    if (subscriptionStatus === 'error') return "Tilkoblingsfeil";
+    if (subscriptionStatus === 'subscribing') return "Kobler til...";
+    if (subscriptionStatus === 'resubscribing') return "Oppdaterer tilkobling...";
+    
+    return "Ukjent status";
   };
   
   return (
@@ -374,7 +432,10 @@ const LiveChart: React.FC = () => {
             className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
             title="Refresh data"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className={cn(
+              "h-4 w-4",
+              subscriptionStatus === 'resubscribing' && "animate-spin"
+            )} />
           </button>
         </div>
       </CardHeader>
@@ -395,12 +456,11 @@ const LiveChart: React.FC = () => {
         </div>
         
         <div className={cn(
-          "text-xs text-center py-1",
-          connectionStatus.includes("Demo") ? "bg-amber-100 text-amber-800" : 
-          connectionStatus.includes("Connected") ? "bg-green-100 text-green-800" : 
-          "bg-red-100 text-red-800"
+          "text-xs text-center py-1 flex items-center justify-center",
+          getStatusColor()
         )}>
-          {connectionStatus}
+          <StatusIcon />
+          <span>{getStatusText()}</span>
         </div>
         
         <Tabs defaultValue={activeTimeRange} onValueChange={setActiveTimeRange} className="w-full">

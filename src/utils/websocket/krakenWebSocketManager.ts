@@ -1,10 +1,15 @@
-
 import { WebSocketCore } from './websocketCore';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { subscribeToTickers as subscribeTickers } from './connectionUtils';
 
 // Singleton instance for Kraken WebSocket
 let krakenWsInstance: WebSocketCore | null = null;
+
+// Keep track of active subscriptions
+const activeSubscriptions = new Set<string>();
+
+// Pending subscriptions that will be processed once connected
+const pendingSubscriptions = new Set<string>();
 
 export const getKrakenWebSocket = (): WebSocketCore => {
   if (!krakenWsInstance) {
@@ -14,9 +19,6 @@ export const getKrakenWebSocket = (): WebSocketCore => {
   }
   return krakenWsInstance;
 };
-
-// Keep track of active subscriptions
-const activeSubscriptions = new Set<string>();
 
 // Subscribe to ticker for multiple pairs
 export const subscribeToTickers = (pairs: string[]): void => {
@@ -33,18 +35,26 @@ export const subscribeToTickers = (pairs: string[]): void => {
 export const subscribeToTicker = (pair: string): void => {
   const wsManager = getKrakenWebSocket();
   
-  // Connect first if not connected
+  // Always track the subscription attempt
+  pendingSubscriptions.add(pair);
+  
+  // Check connection status including demo mode
   if (!wsManager.isConnected() && !wsManager.isForceDemoMode()) {
     console.log('WebSocket not connected, connecting before subscribing...');
-    wsManager.connect().catch(err => {
-      console.error('Failed to connect WebSocket before subscribing:', err);
-    });
-  }
-  
-  // Only subscribe if not already subscribed
-  if (!activeSubscriptions.has(pair)) {
-    if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
-      console.log(`Subscribing to ${pair} ticker...`);
+    
+    // Store for later subscription after connection
+    wsManager.connect()
+      .then(() => {
+        // Now that we're connected, subscribe to pending pairs
+        processPendingSubscriptions();
+      })
+      .catch(err => {
+        console.error('Failed to connect WebSocket before subscribing:', err);
+      });
+  } else {
+    // We're either connected or in demo mode, so we can subscribe immediately
+    if (!activeSubscriptions.has(pair)) {
+      console.log(`Subscribing to ${pair} ticker in ${wsManager.isForceDemoMode() ? 'demo' : 'real'} mode...`);
       wsManager.send({
         event: "subscribe",
         pair: [pair],
@@ -53,15 +63,55 @@ export const subscribeToTicker = (pair: string): void => {
         }
       });
       activeSubscriptions.add(pair);
-    } else {
-      console.warn(`Cannot subscribe to ${pair}: WebSocket not connected`);
+      pendingSubscriptions.delete(pair);
     }
   }
 };
 
+// Process any pending subscriptions
+function processPendingSubscriptions(): void {
+  const wsManager = getKrakenWebSocket();
+  
+  if (pendingSubscriptions.size === 0) {
+    return;
+  }
+  
+  console.log(`Processing ${pendingSubscriptions.size} pending subscriptions...`);
+  
+  if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
+    const pendingPairs = Array.from(pendingSubscriptions);
+    
+    // Subscribe in batches to avoid overwhelming the connection
+    const batchSize = 5;
+    for (let i = 0; i < pendingPairs.length; i += batchSize) {
+      const batch = pendingPairs.slice(i, i + batchSize);
+      
+      setTimeout(() => {
+        batch.forEach(pair => {
+          if (!activeSubscriptions.has(pair)) {
+            console.log(`Processing pending subscription for ${pair}...`);
+            wsManager.send({
+              event: "subscribe",
+              pair: [pair],
+              subscription: {
+                name: "ticker"
+              }
+            });
+            activeSubscriptions.add(pair);
+            pendingSubscriptions.delete(pair);
+          }
+        });
+      }, (i / batchSize) * 200); // 200ms delay between batches
+    }
+  }
+}
+
 // Unsubscribe from ticker for a single pair
 export const unsubscribeFromTicker = (pair: string): void => {
   const wsManager = getKrakenWebSocket();
+  
+  // Always remove from pending
+  pendingSubscriptions.delete(pair);
   
   if (activeSubscriptions.has(pair)) {
     if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
@@ -76,6 +126,8 @@ export const unsubscribeFromTicker = (pair: string): void => {
       activeSubscriptions.delete(pair);
     } else {
       console.warn(`Cannot unsubscribe from ${pair}: WebSocket not connected`);
+      // Still remove from active subscriptions to prevent stale state
+      activeSubscriptions.delete(pair);
     }
   }
 };
