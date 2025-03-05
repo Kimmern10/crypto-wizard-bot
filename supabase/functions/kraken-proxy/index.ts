@@ -23,12 +23,12 @@ serve(async (req) => {
     console.log('Proxy received request:', req.url);
     
     // Special handler for health check
-    const url = new URL(req.url);
-    if (url.pathname.endsWith('/health') || url.searchParams.get('health') === 'check') {
+    const requestUrl = new URL(req.url);
+    if (requestUrl.pathname.endsWith('/health') || requestUrl.searchParams.get('health') === 'check') {
       return new Response(JSON.stringify({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        version: '1.0.1'
+        version: '1.0.2'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200
@@ -131,8 +131,8 @@ serve(async (req) => {
     }
 
     // Build URL
-    const url = `${API_URL}/${API_VERSION}/${path}`;
-    console.log(`Sending request to: ${url}`);
+    const apiUrl = `${API_URL}/${API_VERSION}/${path}`;
+    console.log(`Sending request to: ${apiUrl}`);
     
     // Set up request options
     const options: RequestInit = {
@@ -181,12 +181,12 @@ serve(async (req) => {
       console.log(`Prepared request body: ${formBody}`);
     }
 
-    console.log(`Sending request to Kraken API: ${url} with method ${options.method}`);
+    console.log(`Sending request to Kraken API: ${apiUrl} with method ${options.method}`);
     
     // Send request to Kraken API
     let response;
     try {
-      response = await fetch(url, options);
+      response = await fetch(apiUrl, options);
     } catch (error) {
       console.error('Network error sending request to Kraken:', error);
       return new Response(
