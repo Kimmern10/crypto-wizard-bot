@@ -82,7 +82,7 @@ export const checkProxyFunction = async (): Promise<boolean> => {
     console.log('Testing Kraken API proxy connection...');
     
     // Call the health endpoint of our Kraken proxy function
-    const response = await supabase.functions.invoke('kraken-proxy', {
+    const { data, error } = await supabase.functions.invoke('kraken-proxy', {
       body: { 
         path: 'health', 
         method: 'GET', 
@@ -91,18 +91,18 @@ export const checkProxyFunction = async (): Promise<boolean> => {
       }
     });
     
-    if (response.error) {
-      console.error('Proxy health check failed:', response.error);
+    if (error) {
+      console.error('Proxy health check failed:', error);
       return false;
     }
     
-    if (!response.data || response.data.error) {
-      console.error('Proxy returned error:', response.data?.error || 'Unknown error');
+    if (!data || data.error) {
+      console.error('Proxy returned error:', data?.error || 'Unknown error');
       return false;
     }
     
     // Successfully received health check response
-    console.log('Kraken proxy is available:', response.data);
+    console.log('Kraken proxy is available:', data);
     return true;
   } catch (error) {
     console.error('Error checking proxy function:', error);

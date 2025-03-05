@@ -24,11 +24,13 @@ serve(async (req) => {
     
     // Special handler for health check
     const requestUrl = new URL(req.url);
-    if (requestUrl.pathname.endsWith('/health') || requestUrl.searchParams.get('health') === 'check') {
+    if (requestUrl.pathname.endsWith('/health') || requestUrl.pathname.includes('/health') || 
+        requestUrl.searchParams.get('health') === 'check') {
+      console.log('Processing health check request');
       return new Response(JSON.stringify({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        version: '1.0.2'
+        version: '1.0.3'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200
@@ -45,6 +47,19 @@ serve(async (req) => {
         JSON.stringify({ error: 'Invalid JSON in request body' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
+    }
+    
+    // Special handler for health check via POST body
+    if (requestData.health === 'check' || requestData.path === 'health') {
+      console.log('Processing health check request via POST body');
+      return new Response(JSON.stringify({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        version: '1.0.3'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200
+      });
     }
     
     const { path, method, isPrivate, data, userId } = requestData;

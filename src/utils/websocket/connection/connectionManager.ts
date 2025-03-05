@@ -28,6 +28,12 @@ export const connectAndSubscribe = (
         description: 'The connection to Kraken API might be using demo mode.',
         duration: 6000
       });
+    } else {
+      console.log('Kraken proxy function is available! API operations should work properly.');
+      toast.success('Kraken API proxy available', {
+        description: 'Connected to Kraken API successfully.',
+        duration: 3000
+      });
     }
     
     // Continue with WebSocket connection regardless of proxy status

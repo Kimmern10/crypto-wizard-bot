@@ -17,8 +17,15 @@ let isProxyAvailable = false;
 
 // Export a function to check for availability of the Kraken proxy
 export const checkKrakenProxyStatus = async (): Promise<boolean> => {
-  isProxyAvailable = await checkProxyFunction();
-  return isProxyAvailable;
+  console.log('Checking Kraken proxy status...');
+  try {
+    isProxyAvailable = await checkProxyFunction();
+    console.log(`Proxy check result: ${isProxyAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}`);
+    return isProxyAvailable;
+  } catch (error) {
+    console.error('Error checking proxy status:', error);
+    return false;
+  }
 };
 
 // Export a function to initialize the WebSocket connection
@@ -35,12 +42,19 @@ export const initializeWebSocket = () => {
   // Check proxy availability
   checkKrakenProxyStatus().then(available => {
     if (!available) {
-      console.warn('Kraken proxy unavailable, some features will be limited');
+      console.warn('Kraken proxy function is not available. API operations will be limited.');
+      toast.warning('Kraken API proxy unavailable. Some features may not work.', {
+        description: 'The connection to Kraken API might be using demo mode.',
+        duration: 6000
+      });
+    } else {
+      console.log('Kraken proxy available! Full functionality enabled.');
     }
-  });
-  
-  // Try to connect immediately
-  ws.connect().catch(error => {
+    
+    // Continue with WebSocket connection regardless of proxy status
+    return ws.connect();
+  })
+  .catch(error => {
     console.error('Failed to initialize WebSocket connection:', error);
     // Don't enable demo mode here - let the connection utils handle that decision
   });
@@ -60,6 +74,11 @@ export const restartWebSocket = async () => {
     toast.warning('Kraken API proxy unavailable', {
       description: 'Connection might use demo mode. Check Supabase Edge Functions.',
       duration: 5000
+    });
+  } else {
+    toast.success('Kraken API proxy available', {
+      description: 'Connected to Kraken API successfully.',
+      duration: 3000 
     });
   }
   
