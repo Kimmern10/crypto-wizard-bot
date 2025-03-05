@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders } from "./utils/corsHeaders.ts";
 import { callKrakenApi, buildApiUrl, mapErrorToStatusCode } from "./services/krakenApiService.ts";
+import { getMockResponse } from "./services/demoDataService.ts";
 
 // Main function handler for all Kraken API proxy requests
 serve(async (req) => {
@@ -45,12 +46,30 @@ serve(async (req) => {
       method = 'POST', 
       isPrivate = true,
       data = {},
-      userId
+      userId,
+      forceDemoMode = false
     } = requestData;
     
     console.log(`Processing ${isPrivate ? 'private' : 'public'} ${method} request to ${path}`);
     
-    // Build the Kraken API URL
+    // Check if we should use demo data
+    // This happens when: forceDemoMode is true, or this is a private endpoint but userId is missing
+    const shouldUseDemoData = forceDemoMode || (isPrivate && !userId);
+    
+    if (shouldUseDemoData) {
+      console.log(`Using demo data for ${path} (${isPrivate ? 'private' : 'public'} endpoint)`);
+      const mockResponse = getMockResponse(path, data);
+      
+      return new Response(
+        JSON.stringify(mockResponse),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+    
+    // For real API requests - Build the Kraken API URL
     const apiUrl = buildApiUrl(path);
     
     // For private endpoints, ensure we have authentication

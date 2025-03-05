@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getConnectionStatus, initializeWebSocket, restartWebSocket, checkKrakenProxyStatus } from '@/utils/websocketManager';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 export const useConnectionState = () => {
   // Connection states
@@ -9,6 +10,48 @@ export const useConnectionState = () => {
   const [isRestarting, setIsRestarting] = useState(false);
   const [lastConnectionCheck, setLastConnectionCheck] = useState(0);
   const [proxyAvailable, setProxyAvailable] = useState<boolean | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  
+  // Check authentication status on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user?.id) {
+        setIsAuthenticated(true);
+        setUserId(data.session.user.id);
+        console.log(`User is authenticated with ID: ${data.session.user.id}`);
+      } else {
+        setIsAuthenticated(false);
+        setUserId(null);
+        console.log('User is not authenticated');
+      }
+    };
+    
+    checkAuth();
+    
+    // Listen for auth changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user?.id) {
+          setIsAuthenticated(true);
+          setUserId(session.user.id);
+          console.log(`User signed in with ID: ${session.user.id}`);
+          
+          // When user signs in, try to restart connection to get live data
+          await restartConnection();
+        } else if (event === 'SIGNED_OUT') {
+          setIsAuthenticated(false);
+          setUserId(null);
+          console.log('User signed out');
+        }
+      }
+    );
+    
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, []);
   
   // First initialization of WebSocket
   useEffect(() => {
@@ -96,6 +139,9 @@ export const useConnectionState = () => {
   // Get the true connection status including demo mode
   const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
   
+  // Determine if we can use authenticated endpoints
+  const canUseAuthenticatedEndpoints = isAuthenticated && userId !== null && proxyAvailable === true;
+  
   return {
     isInitializing,
     isRestarting,
@@ -103,6 +149,9 @@ export const useConnectionState = () => {
     restartConnection,
     wsConnected,
     isDemoMode,
-    proxyAvailable
+    proxyAvailable,
+    isAuthenticated,
+    userId,
+    canUseAuthenticatedEndpoints
   };
 };
