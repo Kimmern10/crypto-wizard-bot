@@ -1,4 +1,3 @@
-
 import { supabase } from '@/integrations/supabase/client';
 import { getConnectionStatus } from '@/utils/websocketManager';
 
@@ -47,6 +46,18 @@ export const krakenRequest = async <T>(
     console.error(`Error in API request to ${endpoint}:`, error);
     throw error;
   }
+};
+
+/**
+ * Clears any cached API data
+ */
+export const clearApiCache = (): void => {
+  console.log('Clearing API cache...');
+  // In a real implementation, this would clear any cached API responses
+  // For now, this is just a placeholder function to fix the build error
+  
+  // You could implement actual cache clearing logic here if needed
+  localStorage.removeItem('krakenApiCache');
 };
 
 /**
