@@ -348,6 +348,37 @@ const LiveChart: React.FC = () => {
     }
   };
   
+  // Function to handle refresh button click
+  const handleRefresh = () => {
+    if (!isConnected) {
+      toast.warning("Ikke tilkoblet WebSocket. Kan ikke hente nye data.");
+      return;
+    }
+    
+    // Request fresh data from WebSocket for the current pair
+    const wsManager = getKrakenWebSocket();
+    
+    // Unsubscribe and resubscribe to get fresh data
+    wsManager.send({
+      method: 'unsubscribe',
+      params: {
+        name: 'ticker',
+        pair: [selectedPair]
+      }
+    });
+    
+    setTimeout(() => {
+      wsManager.send({
+        method: 'subscribe',
+        params: {
+          name: 'ticker',
+          pair: [selectedPair]
+        }
+      });
+      toast.success(`Oppdaterer data for ${selectedPair}`);
+    }, 300);
+  };
+  
   return (
     <Card className="glass-card">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -382,7 +413,7 @@ const LiveChart: React.FC = () => {
         </div>
         <div className="flex items-center space-x-2">
           <button 
-            onClick={() => generateDemoData(selectedPair)} 
+            onClick={handleRefresh} 
             className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
             title="Refresh data"
           >
