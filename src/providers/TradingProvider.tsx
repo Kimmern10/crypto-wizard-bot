@@ -1,3 +1,4 @@
+
 import { useState, useEffect, ReactNode } from 'react';
 import TradingContext from '@/contexts/TradingContext';
 import { useApiCredentials } from '@/hooks/useApiCredentials';
@@ -5,16 +6,26 @@ import { useKrakenApi } from '@/hooks/useKrakenApi';
 import { useStrategyState } from '@/hooks/useStrategyState';
 import { useTradeDataState } from '@/hooks/useTradeDataState';
 import { setupWebSocket } from '@/utils/tradingWebSocket';
-import { getKrakenWebSocket, initializeWebSocket, getConnectionStatus, restartWebSocket } from '@/utils/websocketManager';
-import { toast } from 'sonner';
+import { getConnectionStatus, getKrakenWebSocket } from '@/utils/websocketManager';
+import { useConnectionState } from '@/hooks/useConnectionState';
+import { useDryRunMode } from '@/hooks/useDryRunMode';
+import { useTradeDataFetching } from '@/hooks/useTradeDataFetching';
+import { availableStrategies } from '@/data/availableStrategies';
 
 export const TradingProvider = ({ children }: { children: ReactNode }) => {
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [lastConnectionCheck, setLastConnectionCheck] = useState(0);
-  const [dryRunMode, setDryRunMode] = useState(false);
-
   const strategyState = useStrategyState();
   const tradeDataState = useTradeDataState();
+
+  // Extract connection state logic
+  const { 
+    isInitializing, 
+    wsConnected, 
+    isDemoMode, 
+    restartConnection 
+  } = useConnectionState();
+
+  // Extract dry run mode logic
+  const { dryRunMode, toggleDryRunMode } = useDryRunMode();
 
   const connectToKraken = async () => {
     try {
@@ -39,24 +50,8 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
 
   const krakenApi = useKrakenApi({ apiKey, apiSecret });
   
-  const toggleDryRunMode = () => {
-    setDryRunMode(prev => {
-      const newMode = !prev;
-      toast.info(newMode ? 'Switched to Dry Run mode' : 'Switched to Real Trading mode', {
-        description: newMode 
-          ? 'Orders will be simulated and no real trades will be executed' 
-          : 'Orders will be executed on the exchange'
-      });
-      return newMode;
-    });
-  };
-
-  // First initialization
-  useEffect(() => {
-    console.log('Initializing WebSocket connection...');
-    initializeWebSocket();
-    setIsInitializing(false);
-  }, []);
+  // Extract data fetching logic
+  const { fetchData, refreshData } = useTradeDataFetching(krakenApi, tradeDataState);
 
   // WebSocket setup after API state is resolved
   useEffect(() => {
@@ -80,132 +75,22 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [krakenApi.isConnected]);
 
-  // Periodic connection check
+  // Update connection status based on demo mode
   useEffect(() => {
-    const connectionCheckInterval = setInterval(() => {
-      const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
-      
-      // Update the status to reflect demo mode properly
-      if (isDemoMode && tradeDataState.connectionStatus !== 'Connected (Demo Mode)') {
-        tradeDataState.setConnectionStatus('Connected (Demo Mode)');
-      } else if (!wsConnected && !isDemoMode && 
-                 !tradeDataState.connectionStatus.includes('Connecting') &&
-                 !tradeDataState.connectionStatus.includes('reconnecting')) {
-        tradeDataState.setConnectionStatus('Disconnected');
-      }
-      
-      setLastConnectionCheck(Date.now());
-    }, 5000);
-    
-    return () => clearInterval(connectionCheckInterval);
-  }, []);
-
-  const fetchData = async (): Promise<void> => {
-    try {
-      console.log('Fetching initial balance data...');
-      const balance = await krakenApi.fetchBalance();
-      if (balance) {
-        tradeDataState.setCurrentBalance(balance);
-      }
-      
-      console.log('Fetching initial trade history...');
-      const history = await krakenApi.fetchTradeHistory();
-      if (history) {
-        tradeDataState.setTradeHistory(history);
-      }
-      
-      console.log('Fetching initial positions data...');
-      const positions = await krakenApi.fetchOpenPositions();
-      if (positions) {
-        tradeDataState.setActivePositions(positions);
-      }
-      
-      console.log('Initial data fetch complete');
-    } catch (error) {
-      console.error('Error fetching initial data:', error);
-      toast.error('Error fetching initial trading data');
+    // If in demo mode, always show as connected with demo indicator
+    if (isDemoMode && tradeDataState.connectionStatus !== 'Connected (Demo Mode)') {
+      tradeDataState.setConnectionStatus('Connected (Demo Mode)');
+    } else if (!wsConnected && !isDemoMode && 
+               !tradeDataState.connectionStatus.includes('Connecting') &&
+               !tradeDataState.connectionStatus.includes('reconnecting')) {
+      tradeDataState.setConnectionStatus('Disconnected');
     }
-  };
+  }, [isDemoMode, wsConnected, tradeDataState.connectionStatus]);
 
-  const refreshData = async (): Promise<void> => {
-    console.log('Manually refreshing data...');
-    toast.info('Refreshing trading data...');
-    
-    try {
-      if (krakenApi.isConnected) {
-        const balance = await krakenApi.fetchBalance();
-        if (balance) {
-          tradeDataState.setCurrentBalance(balance);
-          console.log('Balance refreshed successfully');
-        }
-        
-        const history = await krakenApi.fetchTradeHistory();
-        if (history) {
-          tradeDataState.setTradeHistory(history);
-          console.log('Trade history refreshed successfully');
-        }
-        
-        const positions = await krakenApi.fetchOpenPositions();
-        if (positions) {
-          tradeDataState.setActivePositions(positions);
-          console.log('Positions refreshed successfully');
-        }
-        
-        toast.success('Trading data refreshed successfully');
-      } else {
-        toast.error('Cannot refresh data: Not connected to API');
-      }
-    } catch (error) {
-      console.error('Error refreshing data:', error);
-      toast.error('Failed to refresh trading data');
-    }
-  };
-
-  const restartConnection = async (): Promise<void> => {
-    try {
-      toast.info('Restarting WebSocket connection...');
-      await restartWebSocket();
-      toast.success('WebSocket connection restarted');
-    } catch (error) {
-      console.error('Error restarting WebSocket connection:', error);
-      toast.error('Failed to restart WebSocket connection');
-    }
-  };
-
-  // Get the true connection status including demo mode
-  const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
-  
   // If in demo mode, always show as connected with demo indicator
   const effectiveConnectionStatus = isDemoMode 
     ? 'Connected (Demo Mode)' 
     : tradeDataState.connectionStatus;
-
-  const availableStrategies = [
-    {
-      id: 'trend_following',
-      name: 'Trend Following',
-      description: 'Follows market trends using momentum indicators',
-      riskLevel: 'Medium'
-    },
-    {
-      id: 'mean_reversion',
-      name: 'Mean Reversion',
-      description: 'Capitalizes on price deviations from historical average',
-      riskLevel: 'Medium-High'
-    },
-    {
-      id: 'breakout',
-      name: 'Breakout',
-      description: 'Identifies and trades price breakouts from consolidation',
-      riskLevel: 'High'
-    },
-    {
-      id: 'ml_adaptive',
-      name: 'ML Adaptive',
-      description: 'Uses machine learning to adapt to changing market conditions',
-      riskLevel: 'Medium-High'
-    }
-  ];
 
   return (
     <TradingContext.Provider value={{
