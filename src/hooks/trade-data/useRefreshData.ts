@@ -2,43 +2,89 @@
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 
+/**
+ * A hook for refreshing trade data from the Kraken API.
+ * 
+ * @param krakenApi - The Kraken API instance
+ * @param tradeDataState - The trade data state object
+ * @returns A function to refresh data
+ */
 export const useRefreshData = (
   krakenApi: any,
   tradeDataState: any
 ) => {
-  const refreshData = useCallback(async (): Promise<void> => {
-    console.log('Manually refreshing data...');
-    toast.info('Refreshing trading data...');
-    
+  const { 
+    setCurrentBalance, 
+    setActivePositions, 
+    setTradeHistory,
+    lastTickerData
+  } = tradeDataState;
+
+  return useCallback(async () => {
+    if (!krakenApi.isConnected) {
+      console.warn('Cannot refresh data: Kraken API not connected');
+      return;
+    }
+
     try {
-      if (krakenApi.isConnected) {
-        const balance = await krakenApi.fetchBalance();
-        if (balance) {
-          tradeDataState.setCurrentBalance(balance);
-          console.log('Balance refreshed successfully');
-        }
-        
-        const history = await krakenApi.fetchTradeHistory();
-        if (history) {
-          tradeDataState.setTradeHistory(history);
-          console.log('Trade history refreshed successfully');
-        }
-        
-        const positions = await krakenApi.fetchOpenPositions();
-        if (positions) {
-          tradeDataState.setActivePositions(positions);
-          console.log('Positions refreshed successfully');
-        }
-        
-        toast.success('Trading data refreshed successfully');
-      } else {
-        toast.error('Cannot refresh data: Not connected to API');
+      console.log('Refreshing trading data...');
+      
+      // Refresh balance
+      const balance = await krakenApi.fetchBalance();
+      if (balance) {
+        setCurrentBalance(balance);
       }
+      
+      // Refresh positions
+      const positions = await krakenApi.fetchOpenPositions();
+      if (positions) {
+        setActivePositions(positions);
+      }
+      
+      // Refresh trade history only if we have active positions or it's been requested explicitly
+      const trades = await krakenApi.fetchTradeHistory();
+      if (trades) {
+        setTradeHistory(trades);
+      }
+      
+      // Ensure we're subscribed to all relevant pairs
+      const activePairs = new Set<string>();
+      
+      // Add pairs from ticker data
+      Object.keys(lastTickerData || {}).forEach(pair => {
+        activePairs.add(pair);
+      });
+      
+      // Add pairs from positions
+      if (positions && positions.length > 0) {
+        positions.forEach((position: any) => {
+          if (position.pair) activePairs.add(position.pair);
+        });
+      }
+      
+      // Refresh subscriptions for active pairs
+      activePairs.forEach((pair: string) => {
+        // Briefly unsubscribe and resubscribe to ensure fresh data
+        krakenApi.unsubscribeFromTicker(pair);
+        
+        // Small delay to prevent overwhelming the API
+        setTimeout(() => {
+          krakenApi.subscribeToTicker(pair);
+        }, 300);
+      });
+      
+      toast.success('Trading data refreshed');
+      return { balance, positions, trades };
     } catch (error) {
       console.error('Error refreshing data:', error);
       toast.error('Failed to refresh trading data');
+      throw error;
     }
-  }, [krakenApi, tradeDataState]);
-
-  return refreshData;
+  }, [
+    krakenApi, 
+    setCurrentBalance, 
+    setActivePositions, 
+    setTradeHistory, 
+    lastTickerData
+  ]);
 };
