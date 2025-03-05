@@ -1,3 +1,4 @@
+
 import { WebSocketCore } from './websocketCore';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { subscribeToTickers as subscribeTickers } from './connectionUtils';
@@ -33,7 +34,7 @@ export const subscribeToTicker = (pair: string): void => {
   const wsManager = getKrakenWebSocket();
   
   // Connect first if not connected
-  if (!wsManager.isConnected()) {
+  if (!wsManager.isConnected() && !wsManager.isForceDemoMode()) {
     console.log('WebSocket not connected, connecting before subscribing...');
     wsManager.connect().catch(err => {
       console.error('Failed to connect WebSocket before subscribing:', err);
@@ -42,7 +43,7 @@ export const subscribeToTicker = (pair: string): void => {
   
   // Only subscribe if not already subscribed
   if (!activeSubscriptions.has(pair)) {
-    if (wsManager.isConnected()) {
+    if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
       console.log(`Subscribing to ${pair} ticker...`);
       wsManager.send({
         event: "subscribe",
@@ -63,7 +64,7 @@ export const unsubscribeFromTicker = (pair: string): void => {
   const wsManager = getKrakenWebSocket();
   
   if (activeSubscriptions.has(pair)) {
-    if (wsManager.isConnected()) {
+    if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
       console.log(`Unsubscribing from ${pair} ticker...`);
       wsManager.send({
         event: "unsubscribe",
@@ -86,3 +87,12 @@ export const getActiveSubscriptions = (): string[] => {
 
 // Re-export checkWebSocketConnection from connectionUtils
 export { checkWebSocketConnection } from './connectionUtils';
+
+// New function to check the overall connection status
+export const getConnectionStatus = (): {isConnected: boolean, isDemoMode: boolean} => {
+  const ws = getKrakenWebSocket();
+  return {
+    isConnected: ws.isConnected(),
+    isDemoMode: ws.isForceDemoMode()
+  };
+};

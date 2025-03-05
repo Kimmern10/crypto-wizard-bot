@@ -1,3 +1,4 @@
+
 import { useState, useEffect, ReactNode } from 'react';
 import TradingContext from '@/contexts/TradingContext';
 import { useApiCredentials } from '@/hooks/useApiCredentials';
@@ -5,7 +6,7 @@ import { useKrakenApi } from '@/hooks/useKrakenApi';
 import { useStrategyState } from '@/hooks/useStrategyState';
 import { useTradeDataState } from '@/hooks/useTradeDataState';
 import { setupWebSocket } from '@/utils/tradingWebSocket';
-import { getKrakenWebSocket, initializeWebSocket } from '@/utils/websocketManager';
+import { getKrakenWebSocket, initializeWebSocket, getConnectionStatus } from '@/utils/websocketManager';
 import { toast } from 'sonner';
 
 export const TradingProvider = ({ children }: { children: ReactNode }) => {
@@ -125,6 +126,10 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Get the true connection status including demo mode
+  const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+  const effectiveConnectionStatus = isDemoMode ? 'Connected (Demo Mode)' : tradeDataState.connectionStatus;
+
   return (
     <TradingContext.Provider value={{
       apiKey,
@@ -132,9 +137,9 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
       isApiConfigured,
       isApiKeyModalOpen,
       isLoadingCredentials,
-      isConnected: krakenApi.isConnected,
+      isConnected: wsConnected || isDemoMode, // Consider demo mode as connected
       isLoading: krakenApi.isLoading,
-      connectionStatus: tradeDataState.connectionStatus,
+      connectionStatus: effectiveConnectionStatus,
       lastConnectionEvent: tradeDataState.lastConnectionEvent,
       lastTickerData: tradeDataState.lastTickerData,
       error: krakenApi.error,

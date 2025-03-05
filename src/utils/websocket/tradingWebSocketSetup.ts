@@ -1,4 +1,5 @@
 
+
 import { toast } from 'sonner';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { WebSocketCore } from './websocketCore';
@@ -56,6 +57,10 @@ export const setupWebSocket = (
               setLastConnectionEvent,
               setLastTickerData
             );
+            
+            // Update connection status for demo mode
+            setConnectionStatus('Connected (Demo Mode)');
+            
             return () => {
               if (cleanupDemoData) cleanupDemoData();
             };
@@ -81,6 +86,9 @@ export const setupWebSocket = (
         setLastConnectionEvent,
         setLastTickerData
       );
+      
+      // Update connection status for demo mode
+      setConnectionStatus('Connected (Demo Mode)');
     });
   
   // Return a cleanup function

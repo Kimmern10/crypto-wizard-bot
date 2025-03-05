@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getKrakenWebSocket } from '@/utils/websocketManager';
+import { getKrakenWebSocket, getConnectionStatus } from '@/utils/websocketManager';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { 
@@ -254,7 +254,11 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   }, [isConnected, corsRestricted, userId, useProxyApi]);
   
   const subscribeToTicker = useCallback((pair: string) => {
-    if (!isConnected) {
+    // Get the true connection status including demo mode
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) {
+      console.log(`Cannot subscribe to ${pair}: WebSocket not connected`);
       return;
     }
     
@@ -267,11 +271,15 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       }
     });
     
-    console.log(`Subscribed to ticker updates for ${pair}`);
-  }, [isConnected]);
+    console.log(`Subscribed to ticker updates for ${pair} (Demo mode: ${isDemoMode})`);
+  }, []);
   
   const unsubscribeFromTicker = useCallback((pair: string) => {
-    if (!isConnected) {
+    // Get the true connection status including demo mode
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) {
+      console.log(`Cannot unsubscribe from ${pair}: WebSocket not connected`);
       return;
     }
     
@@ -284,8 +292,8 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       }
     });
     
-    console.log(`Unsubscribed from ticker updates for ${pair}`);
-  }, [isConnected]);
+    console.log(`Unsubscribed from ticker updates for ${pair} (Demo mode: ${isDemoMode})`);
+  }, []);
   
   return {
     isConnected,

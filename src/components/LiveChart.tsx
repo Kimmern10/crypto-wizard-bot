@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTradingContext } from '@/hooks/useTradingContext';
-import { getKrakenWebSocket, type WebSocketMessage } from '@/utils/websocketManager';
+import { getKrakenWebSocket, getConnectionStatus, type WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
 import { ArrowUp, ArrowDown, Clock, Activity, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -28,15 +28,12 @@ interface ChartState {
 const initialTimeRanges = ['1H', '6H', '24H', '7D'];
 
 const LiveChart: React.FC = () => {
-  // Trading context for connection status
-  const { isConnected, lastTickerData } = useTradingContext();
+  const { isConnected, lastTickerData, connectionStatus } = useTradingContext();
   
-  // State for the selected currency pair
   const [selectedPair, setSelectedPair] = useState<string>('XBT/USD');
   const [availablePairs, setAvailablePairs] = useState<string[]>(['XBT/USD', 'ETH/USD', 'XRP/USD', 'DOT/USD', 'ADA/USD']);
   const [activeTimeRange, setActiveTimeRange] = useState<string>(initialTimeRanges[1]);
   
-  // Chart data state
   const [chartState, setChartState] = useState<ChartState>({
     data: [],
     lastPrice: 0,
@@ -47,7 +44,6 @@ const LiveChart: React.FC = () => {
     volume: 0
   });
   
-  // Refs to track data collection
   const dataCollectionRef = useRef<{
     isActive: boolean;
     startTime: number;
@@ -56,11 +52,10 @@ const LiveChart: React.FC = () => {
   }>({
     isActive: false,
     startTime: Date.now(),
-    maxDataPoints: 300, // Max points to show on chart
+    maxDataPoints: 300,
     dataByTimeRange: initialTimeRanges.reduce((acc, range) => ({...acc, [range]: []}), {})
   });
   
-  // Function to update chart with new ticker data
   const updateChartWithTickerData = (tickerData: any, pair: string) => {
     if (!tickerData || !tickerData.c || !tickerData.c[0]) {
       return;
@@ -70,18 +65,15 @@ const LiveChart: React.FC = () => {
     const currentVolume = parseFloat(tickerData.v[1] || '0');
     const timestamp = new Date();
     
-    // Add new data point
     const newDataPoint: PriceDataPoint = {
       time: timestamp.toLocaleTimeString(),
       price: currentPrice,
       volume: currentVolume
     };
     
-    // Update data for each time range
     const collection = dataCollectionRef.current;
     const now = Date.now();
     
-    // Process data for each time range
     initialTimeRanges.forEach(range => {
       let timeWindow: number;
       
@@ -93,10 +85,8 @@ const LiveChart: React.FC = () => {
         default: timeWindow = 24 * 60 * 60 * 1000;
       }
       
-      // Add new point to this time range
       collection.dataByTimeRange[range].push(newDataPoint);
       
-      // Filter out data older than the time window
       collection.dataByTimeRange[range] = collection.dataByTimeRange[range]
         .filter(point => {
           const pointTime = new Date(timestamp);
@@ -108,7 +98,6 @@ const LiveChart: React.FC = () => {
           return now - pointTime.getTime() < timeWindow;
         });
       
-      // Limit data points if needed
       if (collection.dataByTimeRange[range].length > collection.maxDataPoints) {
         collection.dataByTimeRange[range] = collection.dataByTimeRange[range].slice(
           collection.dataByTimeRange[range].length - collection.maxDataPoints
@@ -116,21 +105,17 @@ const LiveChart: React.FC = () => {
       }
     });
     
-    // Calculate metrics for display
     const firstPrice = collection.dataByTimeRange[activeTimeRange][0]?.price || currentPrice;
     const priceChange = currentPrice - firstPrice;
     const priceChangePercent = (priceChange / firstPrice) * 100;
     
-    // Find high and low prices in the current range
     const pricesInRange = collection.dataByTimeRange[activeTimeRange].map(d => d.price);
     const highPrice = Math.max(...pricesInRange, 0);
     const lowPrice = Math.min(...pricesInRange, Infinity);
     
-    // Calculate total volume in the current range
     const totalVolume = collection.dataByTimeRange[activeTimeRange]
       .reduce((sum, point) => sum + (point.volume || 0), 0);
     
-    // Update chart state
     setChartState({
       data: [...collection.dataByTimeRange[activeTimeRange]],
       lastPrice: currentPrice,
@@ -142,30 +127,26 @@ const LiveChart: React.FC = () => {
     });
   };
   
-  // Set up WebSocket subscription for the selected pair
   useEffect(() => {
-    if (!isConnected) {
-      // Generate some initial demo data if not connected
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) {
       generateDemoData(selectedPair);
       return;
     }
     
-    console.log(`Setting up subscription for ${selectedPair}`);
+    console.log(`Setting up subscription for ${selectedPair} (Demo mode: ${isDemoMode})`);
     
-    // Get WebSocket instance
     const wsManager = getKrakenWebSocket();
     
-    // Create a handler for ticker updates
     const handleTickerUpdate = (message: WebSocketMessage) => {
       if (message.type === 'ticker' && message.data.pair === selectedPair) {
         updateChartWithTickerData(message.data, selectedPair);
       }
     };
     
-    // Subscribe to ticker updates for the selected pair
     const unsubscribe = wsManager.subscribe(handleTickerUpdate);
     
-    // Subscribe to ticker for the selected pair - Using correct Kraken format
     wsManager.send({
       event: "subscribe",
       pair: [selectedPair],
@@ -174,16 +155,13 @@ const LiveChart: React.FC = () => {
       }
     });
     
-    // Check if we have existing data for this pair in lastTickerData
     if (lastTickerData && lastTickerData[selectedPair]) {
       updateChartWithTickerData(lastTickerData[selectedPair], selectedPair);
     }
     
-    // Mark data collection as active
     dataCollectionRef.current.isActive = true;
     dataCollectionRef.current.startTime = Date.now();
     
-    // Cleanup function to unsubscribe when component unmounts or pair changes
     return () => {
       unsubscribe();
       wsManager.send({
@@ -196,15 +174,12 @@ const LiveChart: React.FC = () => {
     };
   }, [isConnected, selectedPair, lastTickerData]);
   
-  // Handle time range changes
   useEffect(() => {
-    // When time range changes, update chart data to show that range
     setChartState(prev => ({
       ...prev,
       data: [...dataCollectionRef.current.dataByTimeRange[activeTimeRange]]
     }));
     
-    // Recalculate metrics for the new time range
     if (dataCollectionRef.current.dataByTimeRange[activeTimeRange].length > 0) {
       const dataForRange = dataCollectionRef.current.dataByTimeRange[activeTimeRange];
       const currentPrice = dataForRange[dataForRange.length - 1].price;
@@ -212,12 +187,10 @@ const LiveChart: React.FC = () => {
       const priceChange = currentPrice - firstPrice;
       const priceChangePercent = (priceChange / firstPrice) * 100;
       
-      // Find high and low prices in the current range
       const pricesInRange = dataForRange.map(d => d.price);
       const highPrice = Math.max(...pricesInRange, 0);
       const lowPrice = Math.min(...pricesInRange, Infinity);
       
-      // Calculate total volume in the current range
       const totalVolume = dataForRange
         .reduce((sum, point) => sum + (point.volume || 0), 0);
       
@@ -233,17 +206,14 @@ const LiveChart: React.FC = () => {
     }
   }, [activeTimeRange]);
   
-  // Function to generate demo data if not connected
   const generateDemoData = (pair: string) => {
     console.log(`Generating demo data for ${pair}`);
     
-    // Clear existing demo data
     const collection = dataCollectionRef.current;
     initialTimeRanges.forEach(range => {
       collection.dataByTimeRange[range] = [];
     });
     
-    // Generate some reasonable base prices for different pairs
     const basePrices: Record<string, number> = {
       'XBT/USD': 36750,
       'ETH/USD': 2470,
@@ -253,9 +223,8 @@ const LiveChart: React.FC = () => {
     };
     
     const basePrice = basePrices[pair] || 1000;
-    const volatility = basePrice * 0.03; // 3% volatility
+    const volatility = basePrice * 0.03;
     
-    // Generate demo data for each time range
     initialTimeRanges.forEach(range => {
       let points: number;
       let timeIncrement: number;
@@ -263,46 +232,40 @@ const LiveChart: React.FC = () => {
       switch(range) {
         case '1H': 
           points = 60; 
-          timeIncrement = 60 * 1000; // 1 minute
+          timeIncrement = 60 * 1000;
           break;
         case '6H': 
           points = 72; 
-          timeIncrement = 5 * 60 * 1000; // 5 minutes
+          timeIncrement = 5 * 60 * 1000;
           break;
         case '24H': 
           points = 96; 
-          timeIncrement = 15 * 60 * 1000; // 15 minutes
+          timeIncrement = 15 * 60 * 1000;
           break;
         case '7D': 
           points = 168; 
-          timeIncrement = 60 * 60 * 1000; // 1 hour
+          timeIncrement = 60 * 60 * 1000;
           break;
         default: 
           points = 100;
           timeIncrement = 15 * 60 * 1000;
       }
       
-      // Create a slightly trending series of prices with some randomness
       let currentPrice = basePrice;
-      let currentVolume = basePrice * 10; // Base volume
-      const trend = Math.random() > 0.5 ? 1 : -1; // Random trend direction
+      let currentVolume = basePrice * 10;
+      const trend = Math.random() > 0.5 ? 1 : -1;
       
       const now = Date.now();
       
-      // Generate data points
       for (let i = 0; i < points; i++) {
-        // Move backwards in time from now
         const pointTime = new Date(now - (points - i) * timeIncrement);
         
-        // Add some randomness to the price, with a slight trend
         const noise = (Math.random() - 0.5) * volatility;
         const trendComponent = (i / points) * trend * (volatility * 2);
         currentPrice = basePrice + noise + trendComponent;
         
-        // Add some randomness to volume too
         currentVolume = basePrice * 10 * (0.5 + Math.random());
         
-        // Add the data point
         collection.dataByTimeRange[range].push({
           time: pointTime.toLocaleTimeString(),
           price: currentPrice,
@@ -311,20 +274,17 @@ const LiveChart: React.FC = () => {
       }
     });
     
-    // Update chart with the demo data for the active range
     const dataForRange = collection.dataByTimeRange[activeTimeRange];
     const currentPrice = dataForRange[dataForRange.length - 1].price;
     const firstPrice = dataForRange[0].price;
     const priceChange = currentPrice - firstPrice;
     const priceChangePercent = (priceChange / firstPrice) * 100;
     
-    // Calculate high, low and volume
     const pricesInRange = dataForRange.map(d => d.price);
     const highPrice = Math.max(...pricesInRange, 0);
     const lowPrice = Math.min(...pricesInRange, Infinity);
     const totalVolume = dataForRange.reduce((sum, point) => sum + (point.volume || 0), 0);
     
-    // Update chart state with the demo data
     setChartState({
       data: [...dataForRange],
       lastPrice: currentPrice,
@@ -336,7 +296,6 @@ const LiveChart: React.FC = () => {
     });
   };
   
-  // Format price for display with appropriate decimal places
   const formatPrice = (price: number) => {
     if (price >= 1000) {
       return price.toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -347,17 +306,16 @@ const LiveChart: React.FC = () => {
     }
   };
   
-  // Function to handle refresh button click
   const handleRefresh = () => {
-    if (!isConnected) {
+    const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
+    
+    if (!wsConnected && !isDemoMode) {
       toast.warning("Ikke tilkoblet WebSocket. Kan ikke hente nye data.");
       return;
     }
     
-    // Request fresh data from WebSocket for the current pair
     const wsManager = getKrakenWebSocket();
     
-    // Unsubscribe and resubscribe to get fresh data
     wsManager.send({
       event: "unsubscribe",
       pair: [selectedPair],
@@ -436,6 +394,15 @@ const LiveChart: React.FC = () => {
           </div>
         </div>
         
+        <div className={cn(
+          "text-xs text-center py-1",
+          connectionStatus.includes("Demo") ? "bg-amber-100 text-amber-800" : 
+          connectionStatus.includes("Connected") ? "bg-green-100 text-green-800" : 
+          "bg-red-100 text-red-800"
+        )}>
+          {connectionStatus}
+        </div>
+        
         <Tabs defaultValue={activeTimeRange} onValueChange={setActiveTimeRange} className="w-full">
           <div className="px-4 pt-2">
             <TabsList className="grid w-full grid-cols-4">
@@ -487,7 +454,7 @@ const LiveChart: React.FC = () => {
                     strokeWidth={2}
                     dot={false}
                     activeDot={{ r: 4 }}
-                    isAnimationActive={false} // Disable animation for live updates
+                    isAnimationActive={false}
                   />
                 </LineChart>
               </ResponsiveContainer>
