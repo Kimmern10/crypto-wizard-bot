@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export const useTradeDataState = () => {
   // Core data states
@@ -78,7 +78,8 @@ export const useTradeDataState = () => {
   };
   
   // Update stats when positions or trade history changes
-  useState(() => {
+  // Here's the fix - using useEffect instead of useState
+  useEffect(() => {
     updateOverallProfitLoss();
   }, [activePositions, tradeHistory]);
 
