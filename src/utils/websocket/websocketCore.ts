@@ -1,9 +1,11 @@
 
-import { WebSocketMessage, ConnectionStatusData } from '@/types/websocketTypes';
-import { ConnectionManager } from './connectionManager';
-import { SubscriptionManager } from './subscriptionManager';
-import { HeartbeatManager } from './heartbeatManager';
-import { MessageProcessor } from './messageProcessor';
+import { WebSocketMessage as WebSocketMessageType, ConnectionStatusData } from '@/types/websocketTypes';
+import { WebSocketConnection } from './WebSocketConnection';
+import { WebSocketDemoMode } from './WebSocketDemoMode';
+import { WebSocketHeartbeat } from './WebSocketHeartbeat';
+import { WebSocketSubscriptions } from './WebSocketSubscriptions';
+import { WebSocketMessageHandler } from './WebSocketMessageHandler';
+import { WebSocketReconnection } from './WebSocketReconnection';
 
 declare global {
   interface Window {
@@ -12,179 +14,114 @@ declare global {
 }
 
 export class WebSocketCore {
-  private socket: WebSocket | null = null;
   private url: string;
-  private forceDemoMode = false;
   
   // Component managers
-  private connectionManager: ConnectionManager;
-  private subscriptionManager: SubscriptionManager;
-  private heartbeatManager: HeartbeatManager;
-  private messageProcessor: MessageProcessor;
+  private connection: WebSocketConnection;
+  private demoMode: WebSocketDemoMode;
+  private heartbeat: WebSocketHeartbeat;
+  private subscriptions: WebSocketSubscriptions;
+  private messageHandler: WebSocketMessageHandler;
+  private reconnection: WebSocketReconnection;
 
   constructor(url: string) {
     this.url = url;
-    this.connectionManager = new ConnectionManager();
-    this.subscriptionManager = new SubscriptionManager();
-    this.heartbeatManager = new HeartbeatManager();
-    this.messageProcessor = new MessageProcessor();
+    this.connection = new WebSocketConnection(url);
+    this.demoMode = new WebSocketDemoMode();
+    this.heartbeat = new WebSocketHeartbeat();
+    this.subscriptions = new WebSocketSubscriptions();
+    this.messageHandler = new WebSocketMessageHandler();
+    this.reconnection = new WebSocketReconnection();
+    
+    // Set up message handling
+    this.connection.setOnMessage((rawData) => {
+      this.heartbeat.updateLastMessageTimestamp();
+      this.messageHandler.processWebSocketMessage(rawData, 'ticker');
+    });
+    
+    // Set up notification handlers
+    this.demoMode.setNotifyHandler((message) => this.messageHandler.notify(message));
+    this.reconnection.setNotifyHandler((message) => this.messageHandler.notify(message));
     
     console.log(`WebSocketCore initialized with URL: ${url}`);
   }
 
   setConnectionAttempts(maxAttempts: number): void {
-    this.connectionManager.setConnectionAttempts(maxAttempts);
+    this.reconnection.setConnectionAttempts(maxAttempts);
   }
 
   setForceDemoMode(force: boolean): void {
-    this.forceDemoMode = force;
-    console.log(`Demo mode ${force ? 'enabled' : 'disabled'}`);
+    this.demoMode.setActive(force, force ? 'CORS restrictions' : '');
     
     if (force) {
       // If forcing demo mode, close any existing connection
       this.disconnect();
-      // Notify subscribers about the mode change
-      this.messageProcessor.notifyHandlers({
-        type: 'modeChange',
-        data: { isDemoMode: true, reason: 'CORS restrictions' }
-      });
     }
   }
 
   isForceDemoMode(): boolean {
-    return this.forceDemoMode;
+    return this.demoMode.isActive();
   }
 
   connect(): Promise<void> {
     // If we're in forced demo mode, don't actually try to connect
-    if (this.forceDemoMode) {
+    if (this.demoMode.isActive()) {
       console.log('WebSocket in forced demo mode, not attempting real connection');
-      this.messageProcessor.notifyHandlers({
+      this.messageHandler.notify({
         type: 'connectionStatus',
         data: { status: 'demoMode', message: 'Operating in demo mode' }
       });
       return Promise.resolve();
     }
 
-    if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
-      console.log('WebSocket already connected or connecting');
+    if (this.connection.isConnected()) {
+      console.log('WebSocket already connected');
       return Promise.resolve();
     }
 
-    if (this.connectionManager.isAttemptingConnection()) {
+    if (this.reconnection.isAttemptingConnection()) {
       console.log('WebSocket connection already in progress');
       return Promise.resolve();
     }
 
-    this.connectionManager.setConnecting(true);
-    this.connectionManager.startConnectionAttempt();
+    this.reconnection.setConnecting(true);
+    this.reconnection.startConnectionAttempt();
     
-    return new Promise((resolve, reject) => {
-      try {
-        console.log(`Connecting to WebSocket at ${this.url}`);
-        this.socket = new WebSocket(this.url);
-
-        // Set a connection timeout
-        const connectionTimeout = setTimeout(() => {
-          if (this.connectionManager.isAttemptingConnection()) {
-            console.error('WebSocket connection attempt timed out');
-            this.connectionManager.setConnecting(false);
-            this.connectionManager.incrementConnectionFailures();
-            
-            if (this.socket) {
-              // Force close the socket if it's still trying to connect
-              try {
-                this.socket.close();
-                this.socket = null;
-              } catch (e) {
-                console.error('Error closing timed out socket:', e);
-              }
-            }
-            
-            reject(new Error('Connection timeout'));
-          }
-        }, 15000); // 15 second timeout
+    return this.connection.connect()
+      .then(() => {
+        // Connection successful
+        this.reconnection.resetReconnectAttempts();
+        this.reconnection.setConnecting(false);
+        this.startHeartbeat();
+        this.heartbeat.updateLastMessageTimestamp();
         
-        this.socket.onopen = () => {
-          console.log('WebSocket connection established to', this.url);
-          clearTimeout(connectionTimeout);
-          this.connectionManager.resetReconnectAttempts();
-          this.connectionManager.setConnecting(false);
-          this.startHeartbeat();
-          this.heartbeatManager.updateLastMessageTimestamp();
-          
-          this.messageProcessor.notifyHandlers({
-            type: 'connectionStatus',
-            data: { status: 'connected', message: 'Connected to Kraken WebSocket' } as ConnectionStatusData
-          });
-          
-          // Re-establish any subscriptions that were active before disconnection
-          this.resubscribeToActiveChannels();
-          
-          resolve();
-        };
-
-        this.socket.onmessage = (event) => {
-          this.heartbeatManager.updateLastMessageTimestamp();
-          try {
-            // Parse raw data
-            const rawData = JSON.parse(event.data);
-            this.messageProcessor.processWebSocketMessage(rawData, 'ticker');
-          } catch (error) {
-            console.error('Error parsing WebSocket message:', error, event.data);
-          }
-        };
-
-        this.socket.onclose = (event) => {
-          clearTimeout(connectionTimeout);
-          console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
-          this.heartbeatManager.stopHeartbeat();
-          this.socket = null;
-          this.connectionManager.setConnecting(false);
-          
-          this.messageProcessor.notifyHandlers({
-            type: 'connectionStatus',
-            data: { 
-              status: 'disconnected', 
-              message: `Connection closed: ${event.code} ${event.reason}` 
-            } as ConnectionStatusData
-          });
-          
-          // Only attempt reconnect if this wasn't a manual disconnect
-          const timeSinceStart = Date.now() - this.connectionManager.getConnectionAttemptStartTime();
-          if (timeSinceStart > 500) { // Only reconnect if the connection was open for a while
-            this.attemptReconnect();
-          }
-        };
-
-        this.socket.onerror = (error) => {
-          clearTimeout(connectionTimeout);
-          console.error('WebSocket error:', error);
-          this.connectionManager.setConnecting(false);
-          this.connectionManager.incrementConnectionFailures();
-          
-          this.messageProcessor.notifyHandlers({
-            type: 'connectionStatus',
-            data: { 
-              status: 'error', 
-              message: 'WebSocket connection error' 
-            } as ConnectionStatusData
-          });
-          
-          reject(error);
-        };
-      } catch (error) {
-        console.error('Error creating WebSocket:', error);
-        this.connectionManager.setConnecting(false);
-        this.connectionManager.incrementConnectionFailures();
-        reject(error);
-      }
-    });
+        this.messageHandler.notify({
+          type: 'connectionStatus',
+          data: { status: 'connected', message: 'Connected to Kraken WebSocket' } as ConnectionStatusData
+        });
+        
+        // Re-establish any subscriptions that were active before disconnection
+        this.resubscribeToActiveChannels();
+      })
+      .catch((error) => {
+        console.error('WebSocket connection failed:', error);
+        this.reconnection.setConnecting(false);
+        this.reconnection.incrementConnectionFailures();
+        
+        this.messageHandler.notify({
+          type: 'connectionStatus',
+          data: { 
+            status: 'error', 
+            message: 'WebSocket connection error' 
+          } as ConnectionStatusData
+        });
+        
+        throw error;
+      });
   }
 
-  // Process WebSocket messages based on their format with debouncing for high-frequency messages
   private resubscribeToActiveChannels(): void {
-    const activeSubscriptions = this.subscriptionManager.getActiveSubscriptions();
+    const activeSubscriptions = this.subscriptions.getActiveSubscriptions();
     
     if (activeSubscriptions.length > 0) {
       console.log('Resubscribing to active channels:', activeSubscriptions);
@@ -205,29 +142,22 @@ export class WebSocketCore {
     }
   }
 
-  notifySubscribers(message: WebSocketMessage): void {
-    this.messageProcessor.notifyHandlers(message);
+  notifySubscribers(message: WebSocketMessageType): void {
+    this.messageHandler.notify(message);
   }
 
   private attemptReconnect() {
-    if (this.forceDemoMode) {
+    if (this.demoMode.isActive()) {
       console.log('In demo mode, not attempting reconnection');
       return;
     }
     
-    if (this.connectionManager.hasReachedMaxAttempts()) {
+    if (this.reconnection.hasReachedMaxAttempts()) {
       console.log('Maximum reconnection attempts reached');
-      
-      this.messageProcessor.notifyHandlers({
-        type: 'connectionStatus',
-        data: { 
-          status: 'failed', 
-          message: 'Maximum reconnection attempts reached' 
-        } as ConnectionStatusData
-      });
+      this.reconnection.notifyMaxAttemptsReached();
       
       // Only force demo mode after persistent connection failures
-      if (this.connectionManager.getConnectionFailures() > 10) {
+      if (this.reconnection.getConnectionFailures() > 10) {
         console.log('Persistent connection failures detected, switching to demo mode');
         this.setForceDemoMode(true);
       }
@@ -235,19 +165,13 @@ export class WebSocketCore {
       return;
     }
 
-    const timeout = this.connectionManager.calculateReconnectTimeout();
+    const timeout = this.reconnection.calculateReconnectTimeout();
     console.log(`Attempting to reconnect in ${timeout}ms...`);
     
-    this.messageProcessor.notifyHandlers({
-      type: 'connectionStatus',
-      data: { 
-        status: 'reconnecting', 
-        message: `Reconnecting in ${Math.round(timeout/1000)}s (attempt ${this.connectionManager.getReconnectAttempts() + 1}/${this.connectionManager.getMaxReconnectAttempts()})` 
-      } as ConnectionStatusData
-    });
+    this.reconnection.notifyReconnecting();
 
     setTimeout(() => {
-      this.connectionManager.incrementReconnectAttempts();
+      this.reconnection.incrementReconnectAttempts();
       this.connect().catch(error => {
         console.error('Reconnection failed:', error);
       });
@@ -255,7 +179,7 @@ export class WebSocketCore {
   }
 
   private startHeartbeat() {
-    this.heartbeatManager.startHeartbeat(
+    this.heartbeat.startHeartbeat(
       () => this.isConnected(),
       () => this.send({ event: 'ping' }),
       () => this.reconnect()
@@ -263,111 +187,60 @@ export class WebSocketCore {
   }
 
   private reconnect() {
-    if (this.forceDemoMode) {
+    if (this.demoMode.isActive()) {
       return;
     }
     
-    if (this.socket) {
-      try {
-        this.socket.close();
-      } catch (error) {
-        console.error('Error closing WebSocket during reconnect:', error);
-      }
-      this.socket = null;
-    }
+    this.disconnect();
     
     this.connect().catch(error => {
       console.error('Reconnection failed:', error);
     });
   }
 
-  subscribe(handler: (message: WebSocketMessage) => void): () => void {
-    return this.messageProcessor.addMessageHandler(handler);
+  subscribe(handler: (message: WebSocketMessageType) => void): () => void {
+    return this.messageHandler.addHandler(handler);
   }
 
   send(message: any): boolean {
-    if (this.forceDemoMode) {
+    if (this.demoMode.isActive()) {
       console.log('In demo mode, not sending actual message:', message);
       
       // For subscriptions in demo mode, track them anyway
       if (message.event === 'subscribe' && message.pair) {
         const pairs = Array.isArray(message.pair) ? message.pair : [message.pair];
-        pairs.forEach(pair => this.subscriptionManager.addSubscription(pair));
-        
-        // Notify about subscription status even in demo mode
-        setTimeout(() => {
-          this.messageProcessor.notifyHandlers({
-            type: 'subscriptionStatus',
-            data: {
-              event: 'subscriptionStatus',
-              status: 'subscribed',
-              pair: message.pair,
-              subscription: { name: message.subscription?.name }
-            }
-          });
-        }, 500);
+        pairs.forEach(pair => this.subscriptions.addSubscription(pair));
       } else if (message.event === 'unsubscribe' && message.pair) {
         const pairs = Array.isArray(message.pair) ? message.pair : [message.pair];
-        pairs.forEach(pair => this.subscriptionManager.removeSubscription(pair));
-        
-        // Notify about unsubscription status even in demo mode
-        setTimeout(() => {
-          this.messageProcessor.notifyHandlers({
-            type: 'subscriptionStatus',
-            data: {
-              event: 'subscriptionStatus',
-              status: 'unsubscribed',
-              pair: message.pair,
-              subscription: { name: message.subscription?.name }
-            }
-          });
-        }, 500);
+        pairs.forEach(pair => this.subscriptions.removeSubscription(pair));
       }
+      
+      // Process fake subscription status messages for demo mode
+      this.demoMode.processFakeSubscription(message);
       
       return true;
     }
     
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      console.error('Cannot send message: WebSocket is not open');
-      return false;
-    }
-
-    try {
-      const messageStr = JSON.stringify(message);
-      console.log('Sending WebSocket message:', messageStr);
-      this.socket.send(messageStr);
-      return true;
-    } catch (error) {
-      console.error('Error sending WebSocket message:', error);
-      return false;
-    }
+    return this.connection.send(message);
   }
 
   disconnect() {
-    this.heartbeatManager.stopHeartbeat();
-    if (this.socket) {
-      try {
-        this.socket.close();
-        this.socket = null;
-      } catch (error) {
-        console.error('Error disconnecting WebSocket:', error);
-        this.socket = null;
-      }
-    }
+    this.heartbeat.stopHeartbeat();
+    this.connection.disconnect();
   }
 
   isConnected(): boolean {
-    if (this.forceDemoMode) {
+    if (this.demoMode.isActive()) {
       return true; // Always report as connected in demo mode
     }
-    return this.socket !== null && this.socket.readyState === WebSocket.OPEN;
+    return this.connection.isConnected();
   }
   
   getActiveSubscriptions(): string[] {
-    return this.subscriptionManager.getActiveSubscriptions();
+    return this.subscriptions.getActiveSubscriptions();
   }
   
   clearSubscriptionCache(): void {
-    this.subscriptionManager.clearMessageDebounce();
+    this.subscriptions.clearMessageDebounce();
   }
 }
