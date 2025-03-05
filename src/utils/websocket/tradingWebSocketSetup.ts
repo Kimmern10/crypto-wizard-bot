@@ -1,9 +1,12 @@
 
-
 import { toast } from 'sonner';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { WebSocketCore } from './websocketCore';
-import { checkWebSocketConnection, checkCorsRestrictions, connectAndSubscribe } from './connectionUtils';
+import { 
+  checkWebSocketConnection, 
+  checkCorsRestrictions, 
+  connectAndSubscribe 
+} from './connectionUtils';
 import { activateDemoMode, handleConnectionFailure } from './demoModeHandler';
 import { handleWebSocketMessage } from './messageHandler';
 
