@@ -1,5 +1,6 @@
 
 import { useState, useEffect, ReactNode } from 'react';
+import { toast } from 'sonner';
 import TradingContext from '@/contexts/TradingContext';
 import { useApiCredentials } from '@/hooks/useApiCredentials';
 import { useKrakenApi } from '@/hooks/useKrakenApi';
