@@ -6,6 +6,7 @@ import { isNonceValid } from "../utils/nonceManager.ts";
 import { createSignature } from "../utils/signatureGenerator.ts";
 import { fetchCredentials } from "../services/credentialsService.ts";
 import { callKrakenApi, buildApiUrl, mapErrorToStatusCode } from "../services/krakenApiService.ts";
+import { API_VERSION } from "../config/apiConfig.ts";
 
 // Health check handler
 const handleHealthCheck = (): Response => {
@@ -154,8 +155,8 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       }
       
       try {
-        // Create signature
-        const signature = createSignature(`/${API_VERSION}/${path}`, nonce, bodyData, apiSecret);
+        // Create signature with the API_VERSION properly imported
+        const signature = createSignature(`/${API_VERSION}/private/${path}`, nonce, bodyData, apiSecret);
         
         // Add API key and signature to headers
         options.headers = {

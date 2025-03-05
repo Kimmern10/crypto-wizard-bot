@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,30 +12,119 @@ import {
   Server,
   ExternalLink,
   KeyRound,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTradingContext } from '@/hooks/useTradingContext';
 
 const ApiDiagnostic: React.FC = () => {
-  const { apiKey, showApiKeyModal, isConnected } = useTradingContext();
+  const { apiKey, showApiKeyModal, isConnected, isAuthenticated, user } = useTradingContext();
   const [isRunningCheck, setIsRunningCheck] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagnosticResults, setDiagnosticResults] = useState<{
     wsConnected: boolean;
     isDemoMode: boolean;
     proxyAvailable: boolean;
     apiKeyConfigured: boolean;
     edgeFunctionDeployed: boolean;
+    isUserAuthenticated: boolean;
+    userId: string | null;
     lastChecked: number;
+    diagnosisDetails: string[];
   }>({
     wsConnected: false,
     isDemoMode: false,
     proxyAvailable: false,
     apiKeyConfigured: false,
     edgeFunctionDeployed: false,
-    lastChecked: 0
+    isUserAuthenticated: false,
+    userId: null,
+    lastChecked: 0,
+    diagnosisDetails: []
   });
+
+  // Run a detailed diagnostic that tests various parts of the system
+  const runDetailedDiagnostic = async () => {
+    setIsDiagnosing(true);
+    const details: string[] = [];
+    
+    try {
+      // 1. Check authentication status
+      details.push(`Authentication check: ${isAuthenticated ? 'Authenticated' : 'Not authenticated'}`);
+      if (isAuthenticated && user) {
+        details.push(`User ID: ${user.id}`);
+      }
+      
+      // 2. Check API credentials
+      const hasApiKey = !!apiKey;
+      details.push(`API Key configured: ${hasApiKey ? 'Yes' : 'No'}`);
+      
+      // 3. Check Edge Function deployment
+      let edgeFunctionResponse: any = null;
+      
+      try {
+        const { data, error } = await supabase.functions.invoke('kraken-proxy', {
+          body: { health: 'check' }
+        });
+        
+        if (error) {
+          details.push(`Edge function health check failed: ${error.message}`);
+          edgeFunctionResponse = null;
+        } else {
+          details.push('Edge function responded to health check');
+          edgeFunctionResponse = data;
+        }
+      } catch (e) {
+        details.push(`Edge function call threw exception: ${e.message}`);
+        edgeFunctionResponse = null;
+      }
+      
+      // 4. Check API credentials in database if authenticated
+      if (isAuthenticated && user) {
+        try {
+          const { data: credData, error: credError } = await supabase
+            .from('api_credentials')
+            .select('api_key')
+            .eq('user_id', user.id)
+            .maybeSingle();
+            
+          if (credError) {
+            details.push(`Database credentials check error: ${credError.message}`);
+          } else if (credData) {
+            details.push('Database credentials check: Credentials found in database');
+          } else {
+            details.push('Database credentials check: No credentials found in database');
+          }
+        } catch (e) {
+          details.push(`Database credentials check exception: ${e.message}`);
+        }
+      }
+      
+      // Display the detailed diagnostic results
+      setDiagnosticResults(prev => ({
+        ...prev,
+        isUserAuthenticated: isAuthenticated,
+        userId: user?.id || null,
+        apiKeyConfigured: hasApiKey,
+        edgeFunctionDeployed: !!edgeFunctionResponse,
+        diagnosisDetails: details,
+        lastChecked: Date.now()
+      }));
+      
+      // Show toast with summary
+      toast.info('Detailed diagnostic complete', {
+        description: `Found ${details.length} diagnostic entries`
+      });
+    } catch (error) {
+      toast.error('Diagnostic failed', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
 
   const runDiagnostics = async () => {
     setIsRunningCheck(true);
@@ -59,6 +149,7 @@ const ApiDiagnostic: React.FC = () => {
         });
         
         console.log(`Edge function health check completed in ${Date.now() - functionCheckStart}ms`);
+        console.log('Edge function response:', data, 'Error:', error);
         edgeFunctionDeployed = !error && !!data;
         
         if (error) {
@@ -77,7 +168,10 @@ const ApiDiagnostic: React.FC = () => {
         proxyAvailable,
         apiKeyConfigured: !!apiKey,
         edgeFunctionDeployed,
-        lastChecked: Date.now()
+        isUserAuthenticated: isAuthenticated,
+        userId: user?.id || null,
+        lastChecked: Date.now(),
+        diagnosisDetails: []
       });
       
       console.log(`Diagnostics completed in ${Date.now() - startTime}ms`);
@@ -119,20 +213,48 @@ const ApiDiagnostic: React.FC = () => {
       <CardHeader className="pb-2">
         <CardTitle className="text-lg flex items-center justify-between">
           <span>API Diagnostics</span>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-8 w-8 p-0" 
-            onClick={runDiagnostics}
-            disabled={isRunningCheck}
-          >
-            <RefreshCw className={`h-4 w-4 ${isRunningCheck ? 'animate-spin' : ''}`} />
-            <span className="sr-only">Refresh</span>
-          </Button>
+          <div className="flex space-x-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-8 w-8 p-0" 
+              onClick={runDetailedDiagnostic}
+              disabled={isDiagnosing}
+              title="Run detailed diagnosis"
+            >
+              <Info className={`h-4 w-4 ${isDiagnosing ? 'animate-pulse' : ''}`} />
+              <span className="sr-only">Detailed Diagnosis</span>
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-8 w-8 p-0" 
+              onClick={runDiagnostics}
+              disabled={isRunningCheck}
+            >
+              <RefreshCw className={`h-4 w-4 ${isRunningCheck ? 'animate-spin' : ''}`} />
+              <span className="sr-only">Refresh</span>
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
+          {/* Authentication Status */}
+          <div className="flex items-center justify-between py-1 border-b">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Authentication Status</span>
+            </div>
+            {diagnosticResults.isUserAuthenticated ? (
+              <div className="flex items-center gap-1">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+                <span className="text-xs">{diagnosticResults.userId?.substring(0, 8)}...</span>
+              </div>
+            ) : (
+              <XCircle className="h-5 w-5 text-red-500" />
+            )}
+          </div>
+          
           {/* WebSocket Connection */}
           <div className="flex items-center justify-between py-1 border-b">
             <div className="flex items-center gap-2">
@@ -224,6 +346,18 @@ const ApiDiagnostic: React.FC = () => {
           )}
         </div>
         
+        {/* Detailed diagnosis results */}
+        {diagnosticResults.diagnosisDetails.length > 0 && (
+          <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-900 border rounded-md">
+            <h4 className="text-sm font-medium mb-2">Detailed Diagnosis</h4>
+            <div className="max-h-32 overflow-y-auto text-xs space-y-1">
+              {diagnosticResults.diagnosisDetails.map((detail, index) => (
+                <div key={index} className="text-muted-foreground">• {detail}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        
         {/* Recommendations based on diagnostic results */}
         {(diagnosticResults.isDemoMode || !diagnosticResults.proxyAvailable || !diagnosticResults.edgeFunctionDeployed) && (
           <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
@@ -250,6 +384,14 @@ const ApiDiagnostic: React.FC = () => {
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span>
                     Application is in Demo Mode with simulated data. Fix the issues above and restart connection.
+                  </span>
+                </li>
+              )}
+              {!diagnosticResults.isUserAuthenticated && (
+                <li className="flex gap-2">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>
+                    You are not authenticated. Sign in to access your API credentials.
                   </span>
                 </li>
               )}

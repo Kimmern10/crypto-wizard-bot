@@ -105,13 +105,20 @@ export const checkProxyFunction = async (): Promise<boolean> => {
       }, 8000);
     });
     
-    // Actual proxy call
+    // Actual proxy call with detailed logging
+    console.log('Making proxy health check request...');
     const proxyPromise = supabase.functions.invoke('kraken-proxy', {
       body: { 
         path: 'health', 
         method: 'GET', 
         isPrivate: false
       }
+    }).then(result => {
+      console.log('Proxy health check response:', result);
+      return result;
+    }).catch(error => {
+      console.error('Proxy health check error caught:', error);
+      return { data: null, error };
     });
     
     // Race the proxy call against the timeout
