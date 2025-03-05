@@ -18,15 +18,19 @@ export const useRefreshData = (
     setCurrentBalance, 
     setActivePositions, 
     setTradeHistory,
-    lastTickerData
+    lastTickerData,
+    setConnectionStatus
   } = tradeDataState;
 
   return useCallback(async () => {
     // Check the actual WebSocket connection status (including demo mode)
     const { isConnected, isDemoMode } = getConnectionStatus();
     
-    if (!isConnected && !isDemoMode && !krakenApi.isConnected) {
-      console.warn('Cannot refresh data: Kraken API not connected');
+    // Allow refreshing if either API or WebSocket is connected, or we're in demo mode
+    const canRefresh = krakenApi.isConnected || isConnected || isDemoMode;
+    
+    if (!canRefresh) {
+      console.warn('Cannot refresh data: No API or WebSocket connection');
       toast.error('Cannot refresh data', {
         description: 'API connection is not established. Try restarting the connection.'
       });
@@ -35,23 +39,46 @@ export const useRefreshData = (
 
     try {
       console.log('Refreshing trading data...');
+      let successCount = 0;
+      let failCount = 0;
       
       // Refresh balance
-      const balance = await krakenApi.fetchBalance();
-      if (balance) {
-        setCurrentBalance(balance);
+      try {
+        const balance = await krakenApi.fetchBalance();
+        if (balance) {
+          setCurrentBalance(balance);
+          successCount++;
+          console.log('Balance updated successfully');
+        }
+      } catch (error) {
+        console.error('Error fetching balance:', error);
+        failCount++;
       }
       
       // Refresh positions
-      const positions = await krakenApi.fetchOpenPositions();
-      if (positions) {
-        setActivePositions(positions);
+      try {
+        const positions = await krakenApi.fetchOpenPositions();
+        if (positions) {
+          setActivePositions(positions);
+          successCount++;
+          console.log('Positions updated successfully');
+        }
+      } catch (error) {
+        console.error('Error fetching positions:', error);
+        failCount++;
       }
       
-      // Refresh trade history only if we have active positions or it's been requested explicitly
-      const trades = await krakenApi.fetchTradeHistory();
-      if (trades) {
-        setTradeHistory(trades);
+      // Refresh trade history
+      try {
+        const trades = await krakenApi.fetchTradeHistory();
+        if (trades) {
+          setTradeHistory(trades);
+          successCount++;
+          console.log('Trade history updated successfully');
+        }
+      } catch (error) {
+        console.error('Error fetching trade history:', error);
+        failCount++;
       }
       
       // Ensure we're subscribed to all relevant pairs
@@ -62,23 +89,32 @@ export const useRefreshData = (
         activePairs.add(pair);
       });
       
-      // Add pairs from positions
-      if (positions && positions.length > 0) {
-        positions.forEach((position: any) => {
-          if (position.pair) activePairs.add(position.pair);
+      // Update connection status based on results
+      if (failCount > 0 && successCount === 0) {
+        setConnectionStatus('Connected with errors');
+        toast.error('Failed to refresh data', {
+          description: 'All data fetches failed. Check connection and try again.'
         });
+        throw new Error('All data fetches failed');
+      } else if (failCount > 0) {
+        // Some operations succeeded, some failed
+        toast.warning('Data partially refreshed', {
+          description: 'Some data could not be updated. Check connection.'
+        });
+        console.warn(`Data refresh partially succeeded: ${successCount} succeeded, ${failCount} failed`);
+      } else if (successCount > 0) {
+        // Everything succeeded
+        if (isDemoMode) {
+          setConnectionStatus('Connected (Demo Mode)');
+        } else {
+          setConnectionStatus('Connected');
+        }
+        toast.success('Trading data refreshed');
+      } else {
+        // No operations succeeded, but also none failed (shouldn't happen)
+        toast.info('No data changes detected');
       }
       
-      // Refresh subscriptions for active pairs in a smarter way
-      // Instead of unsubscribing and resubscribing, we'll just ensure we're subscribed
-      activePairs.forEach((pair: string) => {
-        // Just ensure the subscription is active
-        krakenApi.subscribeToTicker(pair);
-      });
-      
-      toast.success('Trading data refreshed');
-      
-      // Return void instead of the data object
       return;
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -90,6 +126,7 @@ export const useRefreshData = (
     setCurrentBalance, 
     setActivePositions, 
     setTradeHistory, 
-    lastTickerData
+    lastTickerData,
+    setConnectionStatus
   ]);
 };

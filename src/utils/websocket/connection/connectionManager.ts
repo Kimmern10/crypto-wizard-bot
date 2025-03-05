@@ -23,7 +23,7 @@ export const connectAndSubscribe = (
   // First check if the Kraken proxy is working
   const proxyCheckTime = Date.now();
   checkProxyFunction().then(proxyAvailable => {
-    console.log(`Proxy check completed in ${Date.now() - proxyCheckTime}ms`);
+    console.log(`Proxy check completed in ${Date.now() - proxyCheckTime}ms: ${proxyAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}`);
     
     if (!proxyAvailable) {
       console.warn('Kraken proxy function is not available. API operations will be limited.');
@@ -63,11 +63,13 @@ export const connectAndSubscribe = (
     reconnectCount++;
     console.error('WebSocket connection failed:', error);
     setConnectionStatus(`WebSocket connection failed (attempt ${reconnectCount})`);
-    setLastConnectionEvent(`Failed at ${new Date().toLocaleTimeString()}`);
+    setLastConnectionEvent(`Failed at ${new Date().toLocaleTimeString()}: ${error.message || 'Unknown error'}`);
     
     // Only show toast on initial failure or after multiple reconnects
     if (reconnectCount === 1 || reconnectCount % 3 === 0) {
-      toast.error('Failed to connect to Kraken WebSocket');
+      toast.error('Failed to connect to Kraken WebSocket', {
+        description: error.message || 'Unknown error occurred'
+      });
     }
   });
   

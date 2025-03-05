@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Wifi, WifiOff, Server, ExternalLink } from 'lucide-react';
+import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { checkKrakenProxyStatus } from '@/utils/websocketManager';
@@ -17,6 +17,7 @@ interface ConnectionStatusProps {
   attemptingReconnect: boolean;
   onRefresh: () => void;
   onReconnect: () => void;
+  lastDataRefresh: string;
 }
 
 const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
@@ -28,7 +29,8 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   refreshing,
   attemptingReconnect,
   onRefresh,
-  onReconnect
+  onReconnect,
+  lastDataRefresh
 }) => {
   const { toast } = useToast();
   const [isCheckingProxy, setIsCheckingProxy] = React.useState(false);
@@ -88,6 +90,12 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
         <p className="text-xs text-muted-foreground mt-1">
           {lastConnectionEvent || 'No connection events yet'}
         </p>
+        
+        <div className="flex items-center mt-2 text-xs text-muted-foreground">
+          <Clock className="h-3 w-3 mr-1" />
+          <span>Last refresh: {lastDataRefresh}</span>
+        </div>
+
         {Object.keys(lastTickerData).length > 0 ? (
           <div className="mt-2 border-t pt-2">
             <p className="text-xs font-medium">Latest Ticker Data:</p>
@@ -123,7 +131,14 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
               size="sm"
               disabled={refreshing}
             >
-              {refreshing ? 'Refreshing...' : 'Refresh data'}
+              {refreshing ? (
+                <span className="flex items-center">
+                  <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                  Refreshing...
+                </span>
+              ) : (
+                'Refresh data'
+              )}
             </Button>
             <Button 
               onClick={onReconnect}

@@ -7,6 +7,8 @@ import ConnectionStatus from './ConnectionStatus';
 import CorsWarning from './CorsWarning';
 import PerformanceSection from './PerformanceSection';
 import ApiDiagnostic from '@/components/ApiDiagnostic';
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle } from 'lucide-react';
 
 interface DashboardLayoutProps {
   isConnected: boolean;
@@ -22,6 +24,8 @@ interface DashboardLayoutProps {
   attemptingReconnect: boolean;
   onRefresh: () => void;
   onReconnect: () => void;
+  lastDataRefresh: string;
+  error: string | null;
 }
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
@@ -38,12 +42,22 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
     refreshing,
     attemptingReconnect,
     onRefresh,
-    onReconnect
+    onReconnect,
+    lastDataRefresh,
+    error
   } = props;
 
   return (
     <div className="space-y-6 animate-fade-in">
       {corsBlocked && <CorsWarning corsBlocked={corsBlocked} />}
+      
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       
       {isDemo && (
         <ApiDiagnostic />
@@ -58,6 +72,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
         <ActivePositions 
           isConnected={isConnected} 
           activePositions={activePositions} 
+          isLoading={refreshing}
         />
 
         <ConnectionStatus 
@@ -70,6 +85,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = (props) => {
           attemptingReconnect={attemptingReconnect}
           onRefresh={onRefresh}
           onReconnect={onReconnect}
+          lastDataRefresh={lastDataRefresh}
         />
       </div>
 

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { toast } from "sonner";
 import DashboardLayout from './dashboard/DashboardLayout';
+import { Loader2 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
   const { 
@@ -15,7 +16,12 @@ const Dashboard: React.FC = () => {
     apiKey,
     isApiConfigured,
     refreshData,
-    restartConnection
+    restartConnection,
+    isLoading,
+    isRefreshing,
+    lastDataRefresh,
+    error,
+    dailyChangePercent
   } = useTradingContext();
   
   const [isDemo, setIsDemo] = useState(false);
@@ -34,11 +40,11 @@ const Dashboard: React.FC = () => {
     ((currentBalance.ETH || 0) * ethPrice)
   );
 
-  // Get daily price change for BTC (as an overall market indicator)
-  const dailyChangePercent = lastTickerData['XBT/USD']?.p?.[1] 
-    ? parseFloat(lastTickerData['XBT/USD'].p[1]) 
-    : (Math.round((Math.random() * 8 - 3) * 10) / 10);
-  
+  // Format timestamp for last refresh
+  const formattedLastRefresh = lastDataRefresh 
+    ? lastDataRefresh.toLocaleTimeString() 
+    : 'Never';
+
   // Check if we're in demo mode or real mode
   useEffect(() => {
     if (Object.keys(lastTickerData).length > 0) {
@@ -74,7 +80,7 @@ const Dashboard: React.FC = () => {
     }
   }, [isConnected, isApiConfigured, connectionStatus, apiKey]);
 
-  // Handle refresh button click
+  // Handle refresh button click with better state management
   const handleRefresh = () => {
     console.log('Manually refreshing data...');
     setRefreshing(true);
@@ -85,14 +91,16 @@ const Dashboard: React.FC = () => {
       })
       .catch((error) => {
         console.error('Error refreshing data:', error);
-        toast.error('Failed to refresh data');
+        toast.error('Failed to refresh data', {
+          description: error instanceof Error ? error.message : 'Unknown error'
+        });
       })
       .finally(() => {
         setRefreshing(false);
       });
   };
   
-  // Handle reconnect button click
+  // Handle reconnect button click with better state management
   const handleReconnect = () => {
     console.log('Manually restarting connection...');
     setAttemptingReconnect(true);
@@ -103,12 +111,27 @@ const Dashboard: React.FC = () => {
       })
       .catch((error) => {
         console.error('Error restarting connection:', error);
-        toast.error('Failed to restart connection');
+        toast.error('Failed to restart connection', {
+          description: error instanceof Error ? error.message : 'Unknown error'
+        });
       })
       .finally(() => {
         setAttemptingReconnect(false);
       });
   };
+
+  // Show loading state while initially loading
+  if (isLoading && !isRefreshing && !refreshing && !attemptingReconnect) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground text-sm">Loading dashboard data...</p>
+        {error && (
+          <p className="text-destructive text-xs mt-2">{error}</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <DashboardLayout
@@ -121,10 +144,12 @@ const Dashboard: React.FC = () => {
       lastTickerData={lastTickerData}
       totalBalanceUSD={totalBalanceUSD}
       dailyChangePercent={dailyChangePercent}
-      refreshing={refreshing}
+      refreshing={refreshing || isRefreshing}
       attemptingReconnect={attemptingReconnect}
       onRefresh={handleRefresh}
       onReconnect={handleReconnect}
+      lastDataRefresh={formattedLastRefresh}
+      error={error}
     />
   );
 };

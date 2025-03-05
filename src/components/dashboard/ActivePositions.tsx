@@ -1,16 +1,18 @@
 
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Activity, AlertTriangle } from 'lucide-react';
+import { Activity, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface ActivePositionsProps {
   isConnected: boolean;
   activePositions: any[];
+  isLoading?: boolean;
 }
 
 const ActivePositions: React.FC<ActivePositionsProps> = ({
   isConnected,
-  activePositions
+  activePositions,
+  isLoading = false
 }) => {
   return (
     <Card className="glass-card animation-delay-200 animate-slide-up">
@@ -21,7 +23,12 @@ const ActivePositions: React.FC<ActivePositionsProps> = ({
         <Activity className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
-        {isConnected ? (
+        {isLoading ? (
+          <div className="flex items-center space-x-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Updating...</span>
+          </div>
+        ) : isConnected ? (
           <div>
             <div className="text-2xl font-bold">{activePositions.length}</div>
             <p className="text-xs text-muted-foreground mt-1">

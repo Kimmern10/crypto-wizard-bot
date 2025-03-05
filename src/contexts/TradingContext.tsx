@@ -39,6 +39,11 @@ export interface TradingContextType {
   }[];
   dryRunMode: boolean;
   toggleDryRunMode: () => void;
+  isInitialDataFetched: boolean;
+  lastDataRefresh: Date | null;
+  isRefreshing: boolean;
+  dailyChangePercent: number;
+  overallProfitLoss: number;
 }
 
 const defaultTradingContext: TradingContextType = {
@@ -60,7 +65,7 @@ const defaultTradingContext: TradingContextType = {
   clearApiCredentials: () => {},
   refreshData: async () => {},
   restartConnection: async () => {},
-  sendOrder: async () => {},
+  sendOrder: async () => ({}),
   currentBalance: { USD: 0, BTC: 0, ETH: 0 },
   activePositions: [],
   tradeHistory: [],
@@ -97,7 +102,12 @@ const defaultTradingContext: TradingContextType = {
     }
   ],
   dryRunMode: false,
-  toggleDryRunMode: () => {}
+  toggleDryRunMode: () => {},
+  isInitialDataFetched: false,
+  lastDataRefresh: null,
+  isRefreshing: false,
+  dailyChangePercent: 0,
+  overallProfitLoss: 0
 };
 
 const TradingContext = createContext<TradingContextType>(defaultTradingContext);

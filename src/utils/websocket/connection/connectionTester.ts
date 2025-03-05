@@ -80,9 +80,23 @@ export const checkCorsRestrictions = async (): Promise<boolean> => {
 export const checkProxyFunction = async (): Promise<boolean> => {
   try {
     console.log('Testing Kraken API proxy connection...');
+    const startTime = Date.now();
     
-    // Call the health endpoint of our Kraken proxy function
-    const { data, error } = await supabase.functions.invoke('kraken-proxy', {
+    // Track proxy health and latency
+    let proxyLatency = 0;
+    let proxyHealth = false;
+    
+    // Call the health endpoint of our Kraken proxy function with a timeout
+    const timeoutPromise = new Promise<{data: null, error: Error}>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          data: null, 
+          error: new Error('Proxy health check timed out after 10 seconds')
+        });
+      }, 10000);
+    });
+    
+    const proxyPromise = supabase.functions.invoke('kraken-proxy', {
       body: { 
         path: 'health', 
         method: 'GET', 
@@ -90,6 +104,12 @@ export const checkProxyFunction = async (): Promise<boolean> => {
         health: 'check'
       }
     });
+    
+    // Race the proxy call against the timeout
+    const { data, error } = await Promise.race([proxyPromise, timeoutPromise]);
+    
+    proxyLatency = Date.now() - startTime;
+    console.log(`Proxy response time: ${proxyLatency}ms`);
     
     if (error) {
       console.error('Proxy health check failed:', error);
@@ -102,8 +122,15 @@ export const checkProxyFunction = async (): Promise<boolean> => {
     }
     
     // Successfully received health check response
+    proxyHealth = true;
     console.log('Kraken proxy is available:', data);
-    return true;
+    
+    // If latency is too high, consider the proxy as degraded
+    if (proxyLatency > 5000) {
+      console.warn(`Proxy latency is high (${proxyLatency}ms), service may be degraded`);
+    }
+    
+    return proxyHealth;
   } catch (error) {
     console.error('Error checking proxy function:', error);
     return false;
