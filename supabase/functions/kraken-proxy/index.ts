@@ -1,44 +1,91 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import CryptoJS from 'https://cdn.skypack.dev/crypto-js';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// CORS headers for alle responser
+// CORS headers for all responses
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Kraken API endepunkter
+// Kraken API endpoints
 const API_URL = 'https://api.kraken.com';
 const API_VERSION = '0';
 
 serve(async (req) => {
-  // Håndter preflight OPTIONS forespørsel
+  // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    console.log('Proxy mottok forespørsel:', req.url);
+    console.log('Proxy received request:', req.url);
     
-    // Parse forespørselsdata
-    const { path, method, isPrivate, data, apiKey, apiSecret } = await req.json();
+    // Parse request data
+    const requestData = await req.json();
+    const { path, method, isPrivate, data, userId } = requestData;
     
-    console.log(`Behandler forespørsel til ${path}, metode: ${method}, privat: ${isPrivate}`);
+    console.log(`Processing request to ${path}, method: ${method}, private: ${isPrivate}`);
 
-    // Sjekk om API-nøkler er påkrevd for private endepunkter
-    if (isPrivate && (!apiKey || !apiSecret)) {
-      return new Response(
-        JSON.stringify({ error: 'API-nøkkel og -hemmelighet er påkrevd for private endepunkter' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-      );
+    // Initialize apiKey and apiSecret
+    let apiKey = '';
+    let apiSecret = '';
+
+    // For private endpoints, fetch API credentials from Supabase
+    if (isPrivate) {
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: 'User ID is required for private endpoints' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        );
+      }
+
+      // Get Supabase URL and key from environment variables
+      const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+      const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+      
+      if (!supabaseUrl || !supabaseKey) {
+        return new Response(
+          JSON.stringify({ error: 'Supabase configuration is missing' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        );
+      }
+
+      // Create Supabase client
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      
+      // Fetch API credentials for Kraken from the database
+      const { data: credentials, error } = await supabase
+        .from('api_credentials')
+        .select('api_key, api_secret')
+        .eq('user_id', userId)
+        .eq('exchange', 'kraken')
+        .maybeSingle();
+
+      if (error || !credentials) {
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch API credentials' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        );
+      }
+
+      apiKey = credentials.api_key;
+      apiSecret = credentials.api_secret;
+      
+      if (!apiKey || !apiSecret) {
+        return new Response(
+          JSON.stringify({ error: 'API key and secret are required for private endpoints' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        );
+      }
     }
 
-    // Bygg URL
+    // Build URL
     const url = `${API_URL}/${API_VERSION}/${path}`;
-    console.log(`Sender forespørsel til: ${url}`);
+    console.log(`Sending request to: ${url}`);
     
-    // Sett opp forespørselsvalg
+    // Set up request options
     const options: RequestInit = {
       method: method || 'POST',
       headers: {
@@ -48,21 +95,21 @@ serve(async (req) => {
 
     let bodyData = data || {};
     
-    // Legg til autentisering for private endepunkter
+    // Add authentication for private endpoints
     if (isPrivate) {
-      // Opprett nonce for autentisering
+      // Create nonce for authentication
       const nonce = Date.now().toString();
       
-      // Legg til nonce i dataene
+      // Add nonce to the data
       bodyData = {
         ...bodyData,
         nonce
       };
       
-      // Opprett signatur
+      // Create signature
       const signature = createSignature(`/${API_VERSION}/${path}`, nonce, bodyData, apiSecret);
       
-      // Legg til API-nøkkel og signatur i headers
+      // Add API key and signature to headers
       options.headers = {
         ...options.headers,
         'API-Key': apiKey,
@@ -70,68 +117,68 @@ serve(async (req) => {
       };
     }
     
-    // Konverter data til URL-kodet format for POST
+    // Convert data to URL-encoded format for POST
     if (method === 'POST' || isPrivate) {
       const formBody = new URLSearchParams(bodyData).toString();
       options.body = formBody;
-      console.log(`Forberedt request body: ${formBody}`);
+      console.log(`Prepared request body: ${formBody}`);
     }
 
-    console.log(`Sender forespørsel til Kraken API: ${url} med metode ${options.method}`);
+    console.log(`Sending request to Kraken API: ${url} with method ${options.method}`);
     
-    // Send forespørsel til Kraken API
+    // Send request to Kraken API
     const response = await fetch(url, options);
     const responseText = await response.text();
     
-    console.log(`Fikk svar fra Kraken API med status: ${response.status}`);
-    console.log(`Response tekst: ${responseText.substring(0, 200)}...`);
+    console.log(`Got response from Kraken API with status: ${response.status}`);
+    console.log(`Response text: ${responseText.substring(0, 200)}...`);
     
     let responseData;
     try {
       responseData = JSON.parse(responseText);
     } catch (e) {
-      console.error(`Feil ved parsing av JSON-svar: ${e.message}`);
-      responseData = { error: `Ugyldig JSON-svar: ${responseText.substring(0, 100)}...` };
+      console.error(`Error parsing JSON response: ${e.message}`);
+      responseData = { error: `Invalid JSON response: ${responseText.substring(0, 100)}...` };
     }
     
-    // Sjekk om Kraken API returnerte feil
+    // Check if Kraken API returned an error
     if (responseData.error && responseData.error.length > 0) {
-      console.error(`Kraken API returnerte feil: ${JSON.stringify(responseData.error)}`);
+      console.error(`Kraken API returned error: ${JSON.stringify(responseData.error)}`);
     }
 
-    // Returner data med CORS-headers
+    // Return data with CORS headers
     return new Response(JSON.stringify(responseData), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: response.status
     });
   } catch (error) {
-    console.error('Feil i Kraken proxy:', error);
+    console.error('Error in Kraken proxy:', error);
     
-    // Returner feilmelding
+    // Return error message
     return new Response(
-      JSON.stringify({ error: error.message || 'Ukjent feil i Kraken proxy' }),
+      JSON.stringify({ error: error.message || 'Unknown error in Kraken proxy' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     );
   }
 });
 
-// Funksjon for å opprette API-signatur
+// Function to create API signature
 function createSignature(path: string, nonce: string, postData: any, apiSecret: string): string {
-  // Dekoder base64-hemmelighet
+  // Decode base64 secret
   const secret = CryptoJS.enc.Base64.parse(apiSecret);
   
-  // Opprett meldingen som skal signeres
+  // Create the message to be signed
   const message = postData.nonce + new URLSearchParams(postData).toString();
   
-  // Opprett SHA256-hash av meldingen
+  // Create SHA256 hash of the message
   const hash = CryptoJS.SHA256(message);
   
-  // Opprett HMAC-SHA512 av den hashede meldingen ved hjelp av den dekodede hemmeligheten
+  // Create HMAC-SHA512 of the hashed message using the decoded secret
   const hmac = CryptoJS.HmacSHA512(
     path + hash.toString(CryptoJS.enc.Hex),
     secret
   );
   
-  // Returner base64-kodet signatur
+  // Return base64-encoded signature
   return CryptoJS.enc.Base64.stringify(hmac);
 }

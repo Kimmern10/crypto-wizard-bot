@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'react';
 import { getKrakenWebSocket, WebSocketMessage } from '@/utils/websocketManager';
 import { toast } from 'sonner';
@@ -68,8 +67,17 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   const [data, setData] = useState<any>(null);
   const [corsRestricted, setCorsRestricted] = useState(false);
   const [useProxyApi, setUseProxyApi] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   
   useEffect(() => {
+    const checkSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user?.id) {
+        setUserId(data.session.user.id);
+      }
+    };
+    
+    checkSession();
     setUseProxyApi(true);
   }, []);
   
@@ -81,15 +89,17 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   ): Promise<T> => {
     try {
       console.log(`Sending request to Kraken-proxy with path: ${path}, method: ${method}, isPrivate: ${isPrivate}`);
+      
+      const requestBody = {
+        path,
+        method,
+        isPrivate,
+        data,
+        userId: isPrivate ? userId : undefined
+      };
+      
       const { data: responseData, error } = await supabase.functions.invoke('kraken-proxy', {
-        body: {
-          path,
-          method,
-          isPrivate,
-          data,
-          apiKey: isPrivate ? config.apiKey : undefined,
-          apiSecret: isPrivate ? config.apiSecret : undefined
-        }
+        body: requestBody
       });
 
       if (error) {
@@ -112,8 +122,8 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     data: any = {}
   ): Promise<T> => {
     try {
-      if (isPrivate && !config.apiKey) {
-        throw new Error('API key not provided');
+      if (isPrivate && !userId && !config.apiKey) {
+        throw new Error('User authentication or API key required for private endpoints');
       }
       
       if (useProxyApi) {
@@ -166,8 +176,8 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   };
   
   const connect = useCallback(async () => {
-    if (!config.apiKey || !config.apiSecret) {
-      setError('API key and secret required');
+    if ((!config.apiKey || !config.apiSecret) && !userId) {
+      setError('API credentials or user authentication required');
       return;
     }
     
@@ -191,7 +201,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
           if (trades && trades.length > 0) {
             try {
               for (const trade of trades) {
-                await supabase.from('trade_history').upsert({
+                const tradeRecord = {
                   user_id: session.session!.user.id,
                   pair: trade.pair,
                   type: trade.type,
@@ -202,7 +212,16 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
                   order_type: trade.orderType,
                   external_id: trade.id,
                   created_at: new Date(trade.time).toISOString()
-                }, { onConflict: 'external_id' });
+                };
+                
+                const { error } = await supabase.from('trade_history').upsert(
+                  tradeRecord, 
+                  { onConflict: 'external_id' }
+                );
+                
+                if (error) {
+                  console.error('Error upserting trade history:', error);
+                }
               }
               console.log('Trade history synchronized with Supabase');
             } catch (error) {
@@ -220,7 +239,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     } finally {
       setIsLoading(false);
     }
-  }, [config.apiKey, config.apiSecret]);
+  }, [config.apiKey, config.apiSecret, userId]);
   
   const fetchBalance = useCallback(async () => {
     if (!isConnected) {
@@ -447,7 +466,6 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       if (session.session && result.result && result.result.txid && Array.isArray(result.result.txid) && result.result.txid.length > 0) {
         try {
           const price = params.price || '0';
-          // Create a trade record that matches the trade_history table schema
           const tradeRecord = {
             user_id: session.session.user.id,
             pair: params.pair,
@@ -461,7 +479,6 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
             created_at: new Date().toISOString()
           };
           
-          // Fix: Pass the single object directly to insert, no array wrapping
           const { error } = await supabase.from('trade_history').insert(tradeRecord);
           
           if (error) {
