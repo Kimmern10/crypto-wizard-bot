@@ -311,7 +311,7 @@ export class WebSocketCore {
       // Resubscribe to each ticker with a small delay
       Array.from(this.activeSubscriptions).forEach((pair, index) => {
         setTimeout(() => {
-          // FIXED: Using correct Kraken WebSocket API subscription format
+          // Using correct Kraken WebSocket API subscription format
           this.send({
             event: "subscribe",
             pair: [pair],

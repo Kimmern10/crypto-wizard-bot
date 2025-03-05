@@ -10,7 +10,6 @@ import { getKrakenWebSocket, initializeWebSocket, getConnectionStatus, restartWe
 import { toast } from 'sonner';
 
 export const TradingProvider = ({ children }: { children: ReactNode }) => {
-  const [error, setError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [lastConnectionCheck, setLastConnectionCheck] = useState(0);
 

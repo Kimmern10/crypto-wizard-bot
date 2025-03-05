@@ -1,4 +1,3 @@
-
 import { WebSocketCore } from './websocketCore';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { subscribeToTickers as subscribeTickers } from './connectionUtils';
@@ -57,7 +56,7 @@ export const subscribeToTicker = (pair: string): void => {
     if (!activeSubscriptions.has(pair)) {
       console.log(`Subscribing to ${pair} ticker in ${wsManager.isForceDemoMode() ? 'demo' : 'real'} mode...`);
       
-      // FIXED: Using correct Kraken WebSocket API subscription format
+      // Using correct Kraken WebSocket API subscription format
       wsManager.send({
         event: "subscribe",
         pair: [pair],
@@ -95,7 +94,7 @@ function processPendingSubscriptions(): void {
           if (!activeSubscriptions.has(pair)) {
             console.log(`Processing pending subscription for ${pair}...`);
             
-            // FIXED: Using correct Kraken WebSocket API subscription format
+            // Using correct Kraken WebSocket API subscription format
             wsManager.send({
               event: "subscribe",
               pair: [pair],
@@ -124,7 +123,7 @@ export const unsubscribeFromTicker = (pair: string): void => {
     if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
       console.log(`Unsubscribing from ${pair} ticker...`);
       
-      // FIXED: Using correct Kraken WebSocket API unsubscription format
+      // Using correct Kraken WebSocket API unsubscription format
       wsManager.send({
         event: "unsubscribe",
         pair: [pair],
