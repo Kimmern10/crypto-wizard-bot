@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export const useTradeDataState = () => {
   // Core data states
@@ -26,62 +26,118 @@ export const useTradeDataState = () => {
   // Data refresh tracking
   const [lastDataRefresh, setLastDataRefresh] = useState<Date | null>(null);
   
+  // Reference to avoid potential stale closures in callbacks
+  const stateRef = useRef({
+    activePositions,
+    tradeHistory
+  });
+  
+  // Update ref whenever the actual state changes
+  useEffect(() => {
+    stateRef.current = {
+      activePositions,
+      tradeHistory
+    };
+  }, [activePositions, tradeHistory]);
+  
   // Calculate daily change percent from ticker data
-  const updateDailyChangePercent = (tickerData: Record<string, any>) => {
+  const updateDailyChangePercent = useCallback((tickerData: Record<string, any>) => {
     if (tickerData['XBT/USD']?.p?.[1]) {
       setDailyChangePercent(parseFloat(tickerData['XBT/USD'].p[1]));
     }
-  };
+  }, []);
   
   // Wrapper for setLastTickerData to also update performance metrics
-  const updateLastTickerData = (updateFn: (prev: Record<string, any>) => Record<string, any>) => {
+  const updateLastTickerData = useCallback((updateFn: (prev: Record<string, any>) => Record<string, any>) => {
     setLastTickerData(prev => {
       const newData = updateFn(prev);
       updateDailyChangePercent(newData);
       return newData;
     });
-  };
+  }, [updateDailyChangePercent]);
   
   // Calculate overall P&L based on positions and trade history
-  const updateOverallProfitLoss = () => {
+  const updateOverallProfitLoss = useCallback(() => {
     let totalPnL = 0;
     
     // Add P&L from active positions
-    activePositions.forEach(position => {
+    stateRef.current.activePositions.forEach(position => {
       if (position.pnl) {
         totalPnL += position.pnl;
       }
     });
     
-    // Calculate closed P&L from trade history (simplified calculation)
+    // Calculate closed P&L from trade history (improved calculation)
     // Only consider trades from the last 30 days
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
-    const recentTrades = tradeHistory.filter(trade => 
+    const recentTrades = stateRef.current.tradeHistory.filter(trade => 
       new Date(trade.time) > thirtyDaysAgo
     );
     
     let tradePnL = 0;
+    
+    // Track buys and sells by pair to calculate realized P&L
+    const pairBalances: Record<string, {
+      bought: number;
+      boughtCost: number;
+      sold: number;
+      soldValue: number;
+    }> = {};
+    
+    // First pass - build up trade data by pair
     recentTrades.forEach(trade => {
-      // This is a simplified P&L calculation
+      if (!pairBalances[trade.pair]) {
+        pairBalances[trade.pair] = {
+          bought: 0,
+          boughtCost: 0,
+          sold: 0,
+          soldValue: 0
+        };
+      }
+      
       const tradeValue = trade.price * trade.volume;
+      
       if (trade.type === 'buy') {
-        tradePnL -= tradeValue + trade.fee;
+        pairBalances[trade.pair].bought += trade.volume;
+        pairBalances[trade.pair].boughtCost += tradeValue + trade.fee;
       } else if (trade.type === 'sell') {
-        tradePnL += tradeValue - trade.fee;
+        pairBalances[trade.pair].sold += trade.volume;
+        pairBalances[trade.pair].soldValue += tradeValue - trade.fee;
+      }
+    });
+    
+    // Second pass - calculate P&L by pair
+    Object.values(pairBalances).forEach(pair => {
+      // Calculate realized P&L for complete trades
+      const realizedVolume = Math.min(pair.bought, pair.sold);
+      if (realizedVolume > 0) {
+        const avgBuyCost = pair.boughtCost / pair.bought * realizedVolume;
+        const avgSellValue = pair.soldValue / pair.sold * realizedVolume;
+        tradePnL += avgSellValue - avgBuyCost;
       }
     });
     
     totalPnL += tradePnL;
     setOverallProfitLoss(totalPnL);
-  };
+  }, []);
   
   // Update stats when positions or trade history changes
-  // Here's the fix - using useEffect instead of useState
   useEffect(() => {
     updateOverallProfitLoss();
-  }, [activePositions, tradeHistory]);
+  }, [activePositions, tradeHistory, updateOverallProfitLoss]);
+  
+  // Error handling - clear errors after a timeout
+  useEffect(() => {
+    if (errorState) {
+      const timer = setTimeout(() => {
+        setErrorState(null);
+      }, 60000); // Clear error after 1 minute
+      
+      return () => clearTimeout(timer);
+    }
+  }, [errorState]);
 
   return {
     // Core data

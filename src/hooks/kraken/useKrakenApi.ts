@@ -1,29 +1,34 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { 
   KrakenApiConfig, 
   KrakenApiResponse,
-  KrakenTimeResponse
+  KrakenTimeResponse,
+  ErrorDetails
 } from '@/types/krakenApiTypes';
 import { useKrakenBalance } from './useKrakenBalance';
 import { useKrakenPositions } from './useKrakenPositions';
 import { useKrakenTradeHistory } from './useKrakenTradeHistory';
 import { useKrakenOrders } from './useKrakenOrders';
 import { useKrakenWebSocket } from './useKrakenWebSocket';
-import { krakenRequest } from '@/utils/kraken/krakenApiUtils';
+import { krakenRequest, clearApiCache } from '@/utils/kraken/krakenApiUtils';
 import { getConnectionStatus } from '@/utils/websocketManager';
 
 export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<ErrorDetails | null>(null);
   const [data, setData] = useState<any>(null);
   const [corsRestricted, setCorsRestricted] = useState(false);
   const [useProxyApi, setUseProxyApi] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [lastSuccessfulApiCall, setLastSuccessfulApiCall] = useState<number | null>(null);
+  
+  // Use ref for tracking connection attempts to prevent duplicates
+  const connectionAttemptRef = useRef<boolean>(false);
   
   // Get WebSocket connection status to use as fallback
   const { isConnected: wsConnected, isDemoMode } = getConnectionStatus();
@@ -52,16 +57,38 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     }
   }, [isDemoMode, isConnected]);
   
-  // Add automatic reconnection attempts
+  // Add automatic reconnection attempts with backoff
   useEffect(() => {
     // If we have a userId but aren't connected, try to connect automatically
-    if (userId && !isConnected && !isLoading && !isDemoMode) {
+    if (userId && !isConnected && !isLoading && !isDemoMode && !connectionAttemptRef.current) {
       console.log('User is logged in but API not connected. Attempting automatic connection...');
-      connect().catch(err => {
-        console.warn('Automatic connection attempt failed:', err.message);
-      });
+      
+      // Set connection attempt flag to prevent multiple simultaneous attempts
+      connectionAttemptRef.current = true;
+      
+      // Add a small delay before attempting connection to avoid race conditions
+      const timeout = setTimeout(() => {
+        connect().catch(err => {
+          console.warn('Automatic connection attempt failed:', err.message);
+          connectionAttemptRef.current = false;
+        });
+      }, 1000);
+      
+      return () => clearTimeout(timeout);
     }
   }, [userId, isConnected, isLoading, isDemoMode]);
+  
+  // Clear error after a timeout
+  useEffect(() => {
+    if (error) {
+      const timeout = setTimeout(() => {
+        setError(null);
+        setErrorDetails(null);
+      }, 30000); // Clear error after 30 seconds
+      
+      return () => clearTimeout(timeout);
+    }
+  }, [error]);
   
   // Periodically check connection health if connected
   useEffect(() => {
@@ -78,6 +105,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
           return;
         }
         
+        console.log('Performing API health check...');
         const serverTime = await krakenRequest<KrakenTimeResponse>(
           'public/Time', 
           userId, 
@@ -89,6 +117,10 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
         // If we got a successful response, update the last successful call timestamp
         if (serverTime && serverTime.result) {
           setLastSuccessfulApiCall(Date.now());
+          if (error) {
+            setError(null);
+            setErrorDetails(null);
+          }
         }
       } catch (err) {
         console.warn('API health check failed:', err instanceof Error ? err.message : String(err));
@@ -97,65 +129,119 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
         if (isConnected && !isDemoMode && 
             (!lastSuccessfulApiCall || Date.now() - lastSuccessfulApiCall > 300000)) {
           setIsConnected(false);
+          const errorMessage = err instanceof Error ? err.message : String(err);
           setError('API connection lost. Try reconnecting.');
+          setErrorDetails({
+            code: 'CONNECTION_LOST',
+            message: errorMessage,
+            timestamp: new Date().toISOString()
+          });
           toast.error('Kraken API connection lost. Try reconnecting.');
         }
       }
     }, 60000); // Check every minute
     
     return () => clearInterval(healthCheckInterval);
-  }, [isConnected, isDemoMode, userId, useProxyApi, lastSuccessfulApiCall]);
+  }, [isConnected, isDemoMode, userId, useProxyApi, lastSuccessfulApiCall, error]);
   
   const connect = useCallback(async () => {
-    // If in demo mode, we're already "connected"
-    if (isDemoMode) {
-      setIsConnected(true);
-      return;
-    }
-    
-    if ((!config.apiKey || !config.apiSecret) && !userId) {
-      setError('API credentials or user authentication required');
-      return;
-    }
-    
-    setIsLoading(true);
-    setError(null);
+    // Reset connection attempt flag at the beginning
+    connectionAttemptRef.current = true;
     
     try {
-      console.log('Attempting to connect to Kraken API via proxy...');
-      
-      const serverTime = await krakenRequest<KrakenTimeResponse>(
-        'public/Time', 
-        userId, 
-        useProxyApi, 
-        false, 
-        'GET'
-      );
-      
-      console.log('Kraken server time:', new Date(serverTime.result.unixtime * 1000).toISOString());
-      
-      setIsConnected(true);
-      setLastSuccessfulApiCall(Date.now());
-      
-      console.log('Connected to Kraken API via Supabase Edge Function');
-      toast.success('Connected to Kraken API');
-      
-      const { data: session } = await supabase.auth.getSession();
-      if (session.session) {
-        fetchTradeHistory().then(async (trades) => {
-          if (trades && trades.length > 0) {
-            await saveTradesToSupabase(trades);
-          }
-        });
+      // If in demo mode, we're already "connected"
+      if (isDemoMode) {
+        setIsConnected(true);
+        connectionAttemptRef.current = false;
+        return;
       }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(`Connection failed: ${errorMessage}`);
-      setIsConnected(false);
-      toast.error(`Connection failed: ${errorMessage}`);
-      throw err;
+      
+      if ((!config.apiKey || !config.apiSecret) && !userId) {
+        setError('API credentials or user authentication required');
+        setErrorDetails({
+          code: 'CREDENTIALS_MISSING',
+          message: 'API credentials or user authentication required',
+          timestamp: new Date().toISOString()
+        });
+        connectionAttemptRef.current = false;
+        return;
+      }
+      
+      setIsLoading(true);
+      setError(null);
+      setErrorDetails(null);
+      
+      // Clear any cached data before connecting
+      clearApiCache();
+      
+      try {
+        console.log('Attempting to connect to Kraken API via proxy...');
+        
+        const serverTime = await krakenRequest<KrakenTimeResponse>(
+          'public/Time', 
+          userId, 
+          useProxyApi, 
+          false, 
+          'GET'
+        );
+        
+        console.log('Kraken server time:', new Date(serverTime.result.unixtime * 1000).toISOString());
+        
+        setIsConnected(true);
+        setLastSuccessfulApiCall(Date.now());
+        
+        console.log('Connected to Kraken API via Supabase Edge Function');
+        toast.success('Connected to Kraken API');
+        
+        const { data: session } = await supabase.auth.getSession();
+        if (session.session) {
+          // When successful, fetch trade history in the background
+          fetchTradeHistory().then(async (trades) => {
+            if (trades && trades.length > 0) {
+              await saveTradesToSupabase(trades);
+            }
+          }).catch(error => {
+            console.warn('Background fetch of trade history failed:', error);
+          });
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        
+        // Check if this is a CORS error
+        const isCorsError = 
+          errorMessage.includes('CORS') || 
+          errorMessage.includes('cross-origin') || 
+          errorMessage.includes('Network request failed');
+        
+        if (isCorsError) {
+          setCorsRestricted(true);
+          setError('Browser CORS restrictions detected. Using demo mode instead.');
+          setErrorDetails({
+            code: 'CORS_RESTRICTED',
+            message: 'Browser CORS restrictions detected. Using demo mode instead.',
+            timestamp: new Date().toISOString()
+          });
+          toast.warning('Browser restrictions detected', {
+            description: 'Using demo mode instead. This is expected in development.'
+          });
+          
+          // In CORS-restricted mode, we'll still enable connection in demo mode
+          setIsConnected(true);
+        } else {
+          setError(`Connection failed: ${errorMessage}`);
+          setErrorDetails({
+            code: 'CONNECTION_FAILED',
+            message: errorMessage,
+            timestamp: new Date().toISOString()
+          });
+          setIsConnected(false);
+          toast.error(`Connection failed: ${errorMessage}`);
+          throw err;
+        }
+      }
     } finally {
       setIsLoading(false);
+      connectionAttemptRef.current = false;
     }
   }, [config.apiKey, config.apiSecret, userId, useProxyApi, fetchTradeHistory, isDemoMode]);
   
@@ -164,6 +250,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
     isConnected: isConnected || isDemoMode, // Consider connected if in demo mode
     isLoading,
     error,
+    errorDetails,
     data,
     connect,
     sendOrder,
