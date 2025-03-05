@@ -76,7 +76,8 @@ export const useFetchInitialData = (
         krakenApi.subscribeToTicker(pair);
       });
 
-      return { balance, positions, trades };
+      // Return void instead of the data object
+      return;
     } catch (error) {
       console.error('Error fetching initial data:', error);
       toast.error('Failed to fetch trading data');

@@ -74,7 +74,9 @@ export const useRefreshData = (
       });
       
       toast.success('Trading data refreshed');
-      return { balance, positions, trades };
+      
+      // Return void instead of the data object
+      return;
     } catch (error) {
       console.error('Error refreshing data:', error);
       toast.error('Failed to refresh trading data');
