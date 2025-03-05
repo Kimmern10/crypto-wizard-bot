@@ -447,7 +447,7 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
       if (session.session && result.result && result.result.txid && Array.isArray(result.result.txid) && result.result.txid.length > 0) {
         try {
           const price = params.price || '0';
-          // Fix: Create a trade record that matches the trade_history table schema
+          // Create a trade record that matches the trade_history table schema
           const tradeRecord = {
             user_id: session.session.user.id,
             pair: params.pair,
@@ -461,8 +461,14 @@ export const useKrakenApi = (config: KrakenApiConfig): KrakenApiResponse => {
             created_at: new Date().toISOString()
           };
           
-          await supabase.from('trade_history').insert(tradeRecord);
-          console.log('Order saved to trade history');
+          // Fix: Pass the single object directly to insert, no array wrapping
+          const { error } = await supabase.from('trade_history').insert(tradeRecord);
+          
+          if (error) {
+            console.error('Error inserting into trade_history:', error);
+          } else {
+            console.log('Order saved to trade history');
+          }
         } catch (e) {
           console.error('Error saving order to trade history:', e);
         }
