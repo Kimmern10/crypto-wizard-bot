@@ -29,7 +29,7 @@ export const checkWebSocketConnection = async (): Promise<boolean> => {
         clearTimeout(timeout);
         // Send a ping to verify connection is working
         try {
-          ws.send(JSON.stringify({ op: 'ping' }));
+          ws.send(JSON.stringify({ event: 'ping' }));
           setTimeout(() => {
             ws.close();
             resolve(true);
@@ -151,11 +151,12 @@ export const subscribeToTickers = (wsManager: WebSocketCore, pairs: string[]): v
     setTimeout(() => {
       if (wsManager.isConnected()) {
         console.log(`Subscribing to ${pair} ticker...`);
+        // FIXED: Use correct Kraken WebSocket API subscription format
         wsManager.send({
-          method: 'subscribe',
-          params: {
-            name: 'ticker',
-            pair: [pair]
+          event: "subscribe",
+          pair: [pair],
+          subscription: {
+            name: "ticker"
           }
         });
       } else {

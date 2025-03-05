@@ -1,3 +1,4 @@
+
 import { WebSocketCore } from './websocketCore';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { subscribeToTickers as subscribeTickers } from './connectionUtils';
@@ -44,11 +45,12 @@ export const subscribeToTicker = (pair: string): void => {
   if (!activeSubscriptions.has(pair)) {
     if (wsManager.isConnected()) {
       console.log(`Subscribing to ${pair} ticker...`);
+      // FIXED: Use correct Kraken WebSocket API subscription format
       wsManager.send({
-        method: 'subscribe',
-        params: {
-          name: 'ticker',
-          pair: [pair]
+        event: "subscribe",
+        pair: [pair],
+        subscription: {
+          name: "ticker"
         }
       });
       activeSubscriptions.add(pair);
@@ -65,11 +67,12 @@ export const unsubscribeFromTicker = (pair: string): void => {
   if (activeSubscriptions.has(pair)) {
     if (wsManager.isConnected()) {
       console.log(`Unsubscribing from ${pair} ticker...`);
+      // FIXED: Use correct Kraken WebSocket API unsubscribe format
       wsManager.send({
-        method: 'unsubscribe',
-        params: {
-          name: 'ticker',
-          pair: [pair]
+        event: "unsubscribe",
+        pair: [pair],
+        subscription: {
+          name: "ticker"
         }
       });
       activeSubscriptions.delete(pair);

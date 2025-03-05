@@ -166,12 +166,12 @@ const LiveChart: React.FC = () => {
     // Subscribe to ticker updates for the selected pair
     const unsubscribe = wsManager.subscribe(handleTickerUpdate);
     
-    // Subscribe to ticker for the selected pair
+    // Subscribe to ticker for the selected pair - Updated to correct format
     wsManager.send({
-      method: 'subscribe',
-      params: {
-        name: 'ticker',
-        pair: [selectedPair]
+      event: "subscribe",
+      pair: [selectedPair],
+      subscription: {
+        name: "ticker"
       }
     });
     
@@ -188,10 +188,10 @@ const LiveChart: React.FC = () => {
     return () => {
       unsubscribe();
       wsManager.send({
-        method: 'unsubscribe',
-        params: {
-          name: 'ticker',
-          pair: [selectedPair]
+        event: "unsubscribe",
+        pair: [selectedPair],
+        subscription: {
+          name: "ticker"
         }
       });
     };
@@ -360,19 +360,19 @@ const LiveChart: React.FC = () => {
     
     // Unsubscribe and resubscribe to get fresh data
     wsManager.send({
-      method: 'unsubscribe',
-      params: {
-        name: 'ticker',
-        pair: [selectedPair]
+      event: "unsubscribe",
+      pair: [selectedPair],
+      subscription: {
+        name: "ticker"
       }
     });
     
     setTimeout(() => {
       wsManager.send({
-        method: 'subscribe',
-        params: {
-          name: 'ticker',
-          pair: [selectedPair]
+        event: "subscribe",
+        pair: [selectedPair],
+        subscription: {
+          name: "ticker"
         }
       });
       toast.success(`Oppdaterer data for ${selectedPair}`);

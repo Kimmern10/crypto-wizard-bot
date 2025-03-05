@@ -350,8 +350,8 @@ export class WebSocketCore {
           return;
         }
         
-        // Send a ping message to Kraken
-        this.send({ op: 'ping' });
+        // Send a ping message to Kraken - Updated to correct format
+        this.send({ event: 'ping' });
       } else {
         this.reconnect();
       }
