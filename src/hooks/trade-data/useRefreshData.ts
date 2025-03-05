@@ -62,15 +62,11 @@ export const useRefreshData = (
         });
       }
       
-      // Refresh subscriptions for active pairs
+      // Refresh subscriptions for active pairs in a smarter way
+      // Instead of unsubscribing and resubscribing, we'll just ensure we're subscribed
       activePairs.forEach((pair: string) => {
-        // Briefly unsubscribe and resubscribe to ensure fresh data
-        krakenApi.unsubscribeFromTicker(pair);
-        
-        // Small delay to prevent overwhelming the API
-        setTimeout(() => {
-          krakenApi.subscribeToTicker(pair);
-        }, 300);
+        // Just ensure the subscription is active
+        krakenApi.subscribeToTicker(pair);
       });
       
       toast.success('Trading data refreshed');

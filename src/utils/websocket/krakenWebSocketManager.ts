@@ -1,3 +1,4 @@
+
 import { WebSocketCore } from './websocketCore';
 import { WebSocketMessage } from '@/types/websocketTypes';
 import { subscribeToTickers as subscribeTickers } from './connectionUtils';
@@ -10,6 +11,12 @@ const activeSubscriptions = new Set<string>();
 
 // Pending subscriptions that will be processed once connected
 const pendingSubscriptions = new Set<string>();
+
+// Track subscription/unsubscription operations in progress to avoid bouncing
+const pendingOperations = new Map<string, {
+  type: 'subscribe' | 'unsubscribe',
+  timestamp: number
+}>();
 
 export const getKrakenWebSocket = (): WebSocketCore => {
   if (!krakenWsInstance) {
@@ -31,12 +38,53 @@ export const subscribeToTickers = (pairs: string[]): void => {
   });
 };
 
+// Helper function to debounce WebSocket operations
+const debounceOperation = (pair: string, operationType: 'subscribe' | 'unsubscribe'): boolean => {
+  const now = Date.now();
+  const pendingOp = pendingOperations.get(pair);
+  
+  // If there's a pending operation for this pair and it's less than 2 seconds old
+  if (pendingOp && now - pendingOp.timestamp < 2000) {
+    console.log(`Debouncing ${operationType} for ${pair}, previous ${pendingOp.type} still in progress`);
+    return false;
+  }
+  
+  // Record this operation
+  pendingOperations.set(pair, {
+    type: operationType,
+    timestamp: now
+  });
+  
+  // Clean up old operations after 5 seconds
+  setTimeout(() => {
+    if (pendingOperations.get(pair)?.timestamp === now) {
+      pendingOperations.delete(pair);
+    }
+  }, 5000);
+  
+  return true;
+};
+
 // Subscribe to ticker for a single pair
 export const subscribeToTicker = (pair: string): void => {
+  // Normalize pair format if needed
+  const normalizedPair = pair.includes('/') ? pair : pair;
+  
   const wsManager = getKrakenWebSocket();
   
+  // If we're already subscribed, don't do anything
+  if (activeSubscriptions.has(normalizedPair)) {
+    console.log(`Already subscribed to ${normalizedPair}, skipping redundant subscription`);
+    return;
+  }
+  
+  // If we're in the middle of subscribing/unsubscribing to this pair, debounce
+  if (!debounceOperation(normalizedPair, 'subscribe')) {
+    return;
+  }
+  
   // Always track the subscription attempt
-  pendingSubscriptions.add(pair);
+  pendingSubscriptions.add(normalizedPair);
   
   // Check connection status including demo mode
   if (!wsManager.isConnected() && !wsManager.isForceDemoMode()) {
@@ -53,21 +101,19 @@ export const subscribeToTicker = (pair: string): void => {
       });
   } else {
     // We're either connected or in demo mode, so we can subscribe immediately
-    if (!activeSubscriptions.has(pair)) {
-      console.log(`Subscribing to ${pair} ticker in ${wsManager.isForceDemoMode() ? 'demo' : 'real'} mode...`);
-      
-      // Using correct Kraken WebSocket API subscription format
-      wsManager.send({
-        event: "subscribe",
-        pair: [pair],
-        subscription: {
-          name: "ticker"
-        }
-      });
-      
-      activeSubscriptions.add(pair);
-      pendingSubscriptions.delete(pair);
-    }
+    console.log(`Subscribing to ${normalizedPair} ticker in ${wsManager.isForceDemoMode() ? 'demo' : 'real'} mode...`);
+    
+    // Using correct Kraken WebSocket API subscription format
+    wsManager.send({
+      event: "subscribe",
+      pair: [normalizedPair],
+      subscription: {
+        name: "ticker"
+      }
+    });
+    
+    activeSubscriptions.add(normalizedPair);
+    pendingSubscriptions.delete(normalizedPair);
   }
 };
 
@@ -114,30 +160,42 @@ function processPendingSubscriptions(): void {
 
 // Unsubscribe from ticker for a single pair
 export const unsubscribeFromTicker = (pair: string): void => {
+  // Normalize pair format if needed
+  const normalizedPair = pair.includes('/') ? pair : pair;
+  
   const wsManager = getKrakenWebSocket();
   
-  // Always remove from pending
-  pendingSubscriptions.delete(pair);
+  // If we're not even subscribed, don't do anything
+  if (!activeSubscriptions.has(normalizedPair)) {
+    console.log(`Not subscribed to ${normalizedPair}, skipping redundant unsubscription`);
+    return;
+  }
   
-  if (activeSubscriptions.has(pair)) {
-    if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
-      console.log(`Unsubscribing from ${pair} ticker...`);
-      
-      // Using correct Kraken WebSocket API unsubscription format
-      wsManager.send({
-        event: "unsubscribe",
-        pair: [pair],
-        subscription: {
-          name: "ticker"
-        }
-      });
-      
-      activeSubscriptions.delete(pair);
-    } else {
-      console.warn(`Cannot unsubscribe from ${pair}: WebSocket not connected`);
-      // Still remove from active subscriptions to prevent stale state
-      activeSubscriptions.delete(pair);
-    }
+  // If we're in the middle of subscribing/unsubscribing to this pair, debounce
+  if (!debounceOperation(normalizedPair, 'unsubscribe')) {
+    return;
+  }
+  
+  // Always remove from pending
+  pendingSubscriptions.delete(normalizedPair);
+  
+  if (wsManager.isConnected() || wsManager.isForceDemoMode()) {
+    console.log(`Unsubscribing from ${normalizedPair} ticker...`);
+    
+    // Using correct Kraken WebSocket API unsubscription format
+    wsManager.send({
+      event: "unsubscribe",
+      pair: [normalizedPair],
+      subscription: {
+        name: "ticker"
+      }
+    });
+    
+    activeSubscriptions.delete(normalizedPair);
+  } else {
+    console.warn(`Cannot unsubscribe from ${normalizedPair}: WebSocket not connected`);
+    // Still remove from active subscriptions to prevent stale state
+    activeSubscriptions.delete(normalizedPair);
   }
 };
 

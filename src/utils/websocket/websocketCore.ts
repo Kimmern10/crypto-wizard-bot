@@ -21,6 +21,7 @@ export class WebSocketCore {
   private activeSubscriptions: Set<string> = new Set();
   private connectionAttemptStarted = 0;
   private connectionFailures = 0;
+  private messageDebounce = new Map<string, number>();
 
   constructor(url: string) {
     this.url = url;
@@ -178,9 +179,9 @@ export class WebSocketCore {
     });
   }
 
-  // Process WebSocket messages based on their format
+  // Process WebSocket messages based on their format with debouncing for high-frequency messages
   private processWebSocketMessage(rawData: any): void {
-    // Print raw message for debugging
+    // Print raw message for debugging (selectively)
     if (typeof rawData === 'object') {
       if (!Array.isArray(rawData) && rawData.event && rawData.event !== 'heartbeat' && rawData.event !== 'pong') {
         console.log('Received WebSocket message:', JSON.stringify(rawData).substring(0, 200));
@@ -188,7 +189,7 @@ export class WebSocketCore {
       
       // Process heartbeat responses
       if (rawData.event === 'pong') {
-        console.log('Received WebSocket message:', JSON.stringify(rawData));
+        console.log('Received WebSocket pong');
         const message: WebSocketMessage = {
           type: 'pong',
           data: { time: new Date() }
@@ -204,6 +205,14 @@ export class WebSocketCore {
       if (rawData.length >= 2 && typeof rawData[1] === 'object' && rawData[1].c) {
         const pairName = rawData[3];
         const tickerData = rawData[1];
+        
+        // Simple debounce for high-frequency ticker updates (one update per pair per 500ms)
+        const now = Date.now();
+        const lastUpdate = this.messageDebounce.get(pairName);
+        if (lastUpdate && now - lastUpdate < 500) {
+          return;
+        }
+        this.messageDebounce.set(pairName, now);
         
         // Validate ticker data
         if (!pairName || !tickerData.c || !Array.isArray(tickerData.c) || !tickerData.c[0]) {
@@ -509,5 +518,9 @@ export class WebSocketCore {
   
   getActiveSubscriptions(): string[] {
     return Array.from(this.activeSubscriptions);
+  }
+  
+  clearSubscriptionCache(): void {
+    this.messageDebounce.clear();
   }
 }
