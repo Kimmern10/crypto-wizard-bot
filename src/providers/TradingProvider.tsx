@@ -1,4 +1,3 @@
-
 import { useState, useEffect, ReactNode } from 'react';
 import TradingContext from '@/contexts/TradingContext';
 import { useApiCredentials } from '@/hooks/useApiCredentials';
@@ -13,11 +12,9 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Initialize hooks for state management
   const strategyState = useStrategyState();
   const tradeDataState = useTradeDataState();
-  
-  // Connect to Kraken function
+
   const connectToKraken = async () => {
     try {
       await krakenApi.connect();
@@ -27,7 +24,6 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Initialize API credentials handler
   const { 
     apiKey, 
     apiSecret, 
@@ -40,18 +36,14 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     clearApiCredentials
   } = useApiCredentials(connectToKraken);
 
-  // Initialize Kraken API service
   const krakenApi = useKrakenApi({ apiKey, apiSecret });
 
-  // Initialize WebSocket connection
   useEffect(() => {
-    // Initialize WebSocket as early as possible
     console.log('Initializing WebSocket connection...');
     initializeWebSocket();
     setIsInitializing(false);
   }, []);
-  
-  // Connect to WebSocket when API is configured
+
   useEffect(() => {
     if (!isInitializing && (isApiConfigured || !apiKey)) {
       console.log('API state resolved, setting up WebSocket...');
@@ -66,10 +58,8 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isApiConfigured, isInitializing, apiKey]);
 
-  // Update balance and history when connected
   useEffect(() => {
     if (krakenApi.isConnected) {
-      // Fetch initial data
       const fetchInitialData = async () => {
         try {
           console.log('Fetching initial balance data...');
@@ -101,8 +91,7 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [krakenApi.isConnected]);
 
-  // Refresh data function
-  const refreshData = async () => {
+  const refreshData = async (): Promise<void> => {
     console.log('Manually refreshing data...');
     toast.info('Refreshing trading data...');
     
@@ -127,15 +116,12 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
         }
         
         toast.success('Trading data refreshed successfully');
-        return true;
       } else {
         toast.error('Cannot refresh data: Not connected to API');
-        return false;
       }
     } catch (error) {
       console.error('Error refreshing data:', error);
       toast.error('Failed to refresh trading data');
-      return false;
     }
   };
 
@@ -159,11 +145,9 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
       clearApiCredentials,
       refreshData,
       sendOrder: krakenApi.sendOrder,
-      // Trade data properties
       currentBalance: tradeDataState.currentBalance,
       activePositions: tradeDataState.activePositions,
       tradeHistory: tradeDataState.tradeHistory,
-      // Strategy properties
       selectedStrategy: strategyState.selectedStrategy,
       setSelectedStrategy: strategyState.setSelectedStrategy,
       isRunning: strategyState.isRunning,
