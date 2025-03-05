@@ -41,7 +41,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
         toast({
           title: "Kraken API proxy is available",
           description: "Connection to Kraken API should work properly.",
-          variant: "success"
+          variant: "default" // Changed from 'success' to 'default'
         });
       } else {
         toast({

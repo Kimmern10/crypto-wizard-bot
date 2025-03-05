@@ -1,5 +1,6 @@
 
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 /**
  * Checks if a WebSocket connection is possible
