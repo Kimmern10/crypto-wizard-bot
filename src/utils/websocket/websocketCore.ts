@@ -1,3 +1,4 @@
+
 import { WebSocketMessage, ConnectionStatusData } from '@/types/websocketTypes';
 
 declare global {
@@ -17,6 +18,7 @@ export class WebSocketCore {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private lastMessageTimestamp = 0;
   private forceDemoMode = false;
+  private activeSubscriptions: Set<string> = new Set();
 
   constructor(url: string) {
     this.url = url;
@@ -74,6 +76,9 @@ export class WebSocketCore {
             type: 'connectionStatus',
             data: { status: 'connected', message: 'Connected to Kraken WebSocket' } as ConnectionStatusData
           });
+          
+          // Re-establish any subscriptions that were active before disconnection
+          this.resubscribeToActiveChannels();
           
           resolve();
         };
@@ -147,8 +152,46 @@ export class WebSocketCore {
         this.messageHandlers.forEach(handler => handler(message));
       }
     } else if (typeof rawData === 'object') {
+      // Handle subscription status messages
+      if (rawData.event === 'subscriptionStatus') {
+        if (rawData.status === 'subscribed' && rawData.pair) {
+          // Add to active subscriptions
+          if (Array.isArray(rawData.pair)) {
+            rawData.pair.forEach((pair: string) => {
+              this.activeSubscriptions.add(pair);
+            });
+          } else {
+            this.activeSubscriptions.add(rawData.pair);
+          }
+          
+          console.log('Successfully subscribed to:', rawData.pair);
+          
+          const message: WebSocketMessage = {
+            type: 'subscriptionStatus',
+            data: rawData
+          };
+          this.messageHandlers.forEach(handler => handler(message));
+        } else if (rawData.status === 'unsubscribed' && rawData.pair) {
+          // Remove from active subscriptions
+          if (Array.isArray(rawData.pair)) {
+            rawData.pair.forEach((pair: string) => {
+              this.activeSubscriptions.delete(pair);
+            });
+          } else {
+            this.activeSubscriptions.delete(rawData.pair);
+          }
+          
+          console.log('Successfully unsubscribed from:', rawData.pair);
+          
+          const message: WebSocketMessage = {
+            type: 'subscriptionStatus',
+            data: rawData
+          };
+          this.messageHandlers.forEach(handler => handler(message));
+        }
+      }
       // System status or other types
-      if (rawData.event === 'heartbeat') {
+      else if (rawData.event === 'heartbeat') {
         const message: WebSocketMessage = {
           type: 'heartbeat',
           data: { time: new Date() }
@@ -179,6 +222,26 @@ export class WebSocketCore {
         };
         this.messageHandlers.forEach(handler => handler(message));
       }
+    }
+  }
+
+  // Resubscribe to channels that were active before connection loss
+  private resubscribeToActiveChannels(): void {
+    if (this.activeSubscriptions.size > 0) {
+      console.log('Resubscribing to active channels:', Array.from(this.activeSubscriptions));
+      
+      // Resubscribe to each ticker with a small delay
+      Array.from(this.activeSubscriptions).forEach((pair, index) => {
+        setTimeout(() => {
+          this.send({
+            method: 'subscribe',
+            params: {
+              name: 'ticker',
+              pair: [pair]
+            }
+          });
+        }, index * 300); // 300ms delay between subscriptions
+      });
     }
   }
 
@@ -283,6 +346,16 @@ export class WebSocketCore {
   send(message: any): boolean {
     if (this.forceDemoMode) {
       console.log('In demo mode, not sending actual message:', message);
+      
+      // For subscriptions in demo mode, track them anyway
+      if (message.method === 'subscribe' && message.params?.pair) {
+        const pairs = Array.isArray(message.params.pair) ? message.params.pair : [message.params.pair];
+        pairs.forEach(pair => this.activeSubscriptions.add(pair));
+      } else if (message.method === 'unsubscribe' && message.params?.pair) {
+        const pairs = Array.isArray(message.params.pair) ? message.params.pair : [message.params.pair];
+        pairs.forEach(pair => this.activeSubscriptions.delete(pair));
+      }
+      
       return true;
     }
     
@@ -318,5 +391,9 @@ export class WebSocketCore {
       return true; // Always report as connected in demo mode
     }
     return this.socket !== null && this.socket.readyState === WebSocket.OPEN;
+  }
+  
+  getActiveSubscriptions(): string[] {
+    return Array.from(this.activeSubscriptions);
   }
 }

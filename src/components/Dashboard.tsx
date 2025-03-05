@@ -17,6 +17,7 @@ import {
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { cn } from '@/lib/utils';
 import PerformanceChart from './PerformanceChart';
+import LiveChart from './LiveChart';
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 
@@ -258,6 +259,9 @@ const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* New LiveChart component */}
+      <LiveChart />
 
       <Card className="glass-card">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
