@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useContext } from 'react';
 import { OrderParams } from '@/types/krakenApiTypes';
 
@@ -19,7 +20,7 @@ export interface TradingContextType {
   setApiCredentials: (apiKey: string, apiSecret: string) => void;
   clearApiCredentials: () => void;
   refreshData: () => Promise<void>;
-  restartConnection: () => Promise<void>; // Add the missing function to the type definition
+  restartConnection: () => Promise<void>;
   sendOrder: (params: OrderParams) => Promise<any>;
   currentBalance: Record<string, number>;
   activePositions: any[];
@@ -30,6 +31,14 @@ export interface TradingContextType {
   toggleRunning: () => void;
   strategyParams: Record<string, any>;
   updateStrategyParams: (params: Record<string, any>) => void;
+  availableStrategies: {
+    id: string;
+    name: string;
+    description: string;
+    riskLevel: string;
+  }[];
+  dryRunMode: boolean;
+  toggleDryRunMode: () => void;
 }
 
 const defaultTradingContext: TradingContextType = {
@@ -60,7 +69,35 @@ const defaultTradingContext: TradingContextType = {
   isRunning: false,
   toggleRunning: () => {},
   strategyParams: {},
-  updateStrategyParams: () => {}
+  updateStrategyParams: () => {},
+  availableStrategies: [
+    {
+      id: 'trend_following',
+      name: 'Trend Following',
+      description: 'Follows market trends using momentum indicators',
+      riskLevel: 'Medium'
+    },
+    {
+      id: 'mean_reversion',
+      name: 'Mean Reversion',
+      description: 'Capitalizes on price deviations from historical average',
+      riskLevel: 'Medium-High'
+    },
+    {
+      id: 'breakout',
+      name: 'Breakout',
+      description: 'Identifies and trades price breakouts from consolidation',
+      riskLevel: 'High'
+    },
+    {
+      id: 'ml_adaptive',
+      name: 'ML Adaptive',
+      description: 'Uses machine learning to adapt to changing market conditions',
+      riskLevel: 'Medium-High'
+    }
+  ],
+  dryRunMode: false,
+  toggleDryRunMode: () => {}
 };
 
 const TradingContext = createContext<TradingContextType>(defaultTradingContext);

@@ -1,4 +1,3 @@
-
 import { useState, useEffect, ReactNode } from 'react';
 import TradingContext from '@/contexts/TradingContext';
 import { useApiCredentials } from '@/hooks/useApiCredentials';
@@ -12,6 +11,7 @@ import { toast } from 'sonner';
 export const TradingProvider = ({ children }: { children: ReactNode }) => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [lastConnectionCheck, setLastConnectionCheck] = useState(0);
+  const [dryRunMode, setDryRunMode] = useState(false);
 
   const strategyState = useStrategyState();
   const tradeDataState = useTradeDataState();
@@ -38,6 +38,18 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
   } = useApiCredentials(connectToKraken);
 
   const krakenApi = useKrakenApi({ apiKey, apiSecret });
+  
+  const toggleDryRunMode = () => {
+    setDryRunMode(prev => {
+      const newMode = !prev;
+      toast.info(newMode ? 'Switched to Dry Run mode' : 'Switched to Real Trading mode', {
+        description: newMode 
+          ? 'Orders will be simulated and no real trades will be executed' 
+          : 'Orders will be executed on the exchange'
+      });
+      return newMode;
+    });
+  };
 
   // First initialization
   useEffect(() => {
@@ -168,6 +180,33 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
     ? 'Connected (Demo Mode)' 
     : tradeDataState.connectionStatus;
 
+  const availableStrategies = [
+    {
+      id: 'trend_following',
+      name: 'Trend Following',
+      description: 'Follows market trends using momentum indicators',
+      riskLevel: 'Medium'
+    },
+    {
+      id: 'mean_reversion',
+      name: 'Mean Reversion',
+      description: 'Capitalizes on price deviations from historical average',
+      riskLevel: 'Medium-High'
+    },
+    {
+      id: 'breakout',
+      name: 'Breakout',
+      description: 'Identifies and trades price breakouts from consolidation',
+      riskLevel: 'High'
+    },
+    {
+      id: 'ml_adaptive',
+      name: 'ML Adaptive',
+      description: 'Uses machine learning to adapt to changing market conditions',
+      riskLevel: 'Medium-High'
+    }
+  ];
+
   return (
     <TradingContext.Provider value={{
       apiKey,
@@ -197,7 +236,10 @@ export const TradingProvider = ({ children }: { children: ReactNode }) => {
       isRunning: strategyState.isRunning,
       toggleRunning: strategyState.toggleRunning,
       strategyParams: strategyState.strategyParams,
-      updateStrategyParams: strategyState.updateStrategyParams
+      updateStrategyParams: strategyState.updateStrategyParams,
+      availableStrategies,
+      dryRunMode,
+      toggleDryRunMode
     }}>
       {children}
     </TradingContext.Provider>
