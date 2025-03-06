@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw, Activity, Key } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   lastDataRefresh,
   onConfigureApi
 }) => {
-  const [isCheckingProxy, setIsCheckingProxy] = React.useState(false);
+  const [isCheckingProxy, setIsCheckingProxy] = useState(false);
   const [lastHeartbeat, setLastHeartbeat] = React.useState<Date>(new Date());
   
   // Update heartbeat every 5 seconds
@@ -173,7 +174,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
               {isCheckingProxy ? 'Checking...' : 'Check API Connection'}
             </Button>
             
-            {onConfigureApi && isDemo && (
+            {onConfigureApi && (
               <Button 
                 onClick={onConfigureApi}
                 className="w-full text-xs py-1 h-auto"

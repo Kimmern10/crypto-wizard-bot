@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ const Dashboard: React.FC = () => {
     lastTickerData,
     apiKey,
     isApiConfigured,
+    isApiKeyModalOpen,
     refreshData,
     restartConnection,
     isLoading,
@@ -93,6 +95,7 @@ const Dashboard: React.FC = () => {
     console.log('Proxy available:', proxyAvailable === null ? 'Unknown' : proxyAvailable ? 'Yes' : 'No');
     console.log('User authenticated:', isAuthenticated ? 'Yes' : 'No');
     console.log('Can use authenticated endpoints:', canUseAuthenticatedEndpoints ? 'Yes' : 'No');
+    console.log('API Key Modal open status:', isApiKeyModalOpen ? 'Open' : 'Closed');
     
     if (isApiConfigured && apiKey) {
       console.log('API key is present, first 4 characters:', apiKey.substring(0, 4) + '...');
@@ -106,7 +109,8 @@ const Dashboard: React.FC = () => {
     isDemoMode, 
     proxyAvailable,
     isAuthenticated,
-    canUseAuthenticatedEndpoints
+    canUseAuthenticatedEndpoints,
+    isApiKeyModalOpen
   ]);
 
   const handleRefresh = () => {
@@ -162,6 +166,11 @@ const Dashboard: React.FC = () => {
       });
       console.error('Login error:', error);
     }
+  };
+  
+  const handleConfigureApi = () => {
+    console.log('Opening API Key configuration modal...');
+    showApiKeyModal();
   };
   
   if (showAuthPrompt && !isAuthenticated && !isInitializing) {
@@ -237,7 +246,7 @@ const Dashboard: React.FC = () => {
         onRefresh={handleRefresh}
         onReconnect={handleReconnect}
         onLogin={handleLogin}
-        onConfigureApi={showApiKeyModal}
+        onConfigureApi={handleConfigureApi}
         lastDataRefresh={formattedLastRefresh}
         error={error}
       />
