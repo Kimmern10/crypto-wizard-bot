@@ -1,4 +1,3 @@
-
 import React from 'react';
 import AccountOverview from './AccountOverview';
 import ConnectionStatus from './ConnectionStatus';
@@ -7,7 +6,8 @@ import CurrencyPriceChart from './CurrencyPriceChart';
 import UserPositions from './UserPositions';
 import NewsAndEvents from './NewsAndEvents';
 import { Button } from "@/components/ui/button";
-import { LogIn, Key } from 'lucide-react';
+import { LogIn, Key, AlertCircle } from 'lucide-react';
+import { Alert, AlertTitle, AlertDescription } from "../ui/alert";
 
 interface DashboardLayoutProps {
   isConnected: boolean;
@@ -75,26 +75,52 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   Sign In
                 </Button>
               )}
-              {onConfigureApi && (
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {isAuthenticated && isDemo && (
+        <Alert variant="warning" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>API Credentials Required</AlertTitle>
+          <AlertDescription className="flex flex-col gap-2">
+            <p>
+              You're signed in but using Demo Mode because your Kraken API credentials are missing. 
+              Configure your API keys to access real-time data and trading capabilities.
+            </p>
+            {onConfigureApi && (
+              <div className="mt-2">
                 <Button 
                   onClick={onConfigureApi}
-                  variant="outline"
+                  variant="default"
                   size="sm"
                   className="flex items-center"
                 >
                   <Key className="mr-1 h-4 w-4" />
-                  API Key
+                  Configure API Keys
                 </Button>
-              )}
-            </div>
-          </div>
-        </div>
+              </div>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       
       {error && (
         <div className="bg-red-50 dark:bg-red-950/30 border border-red-300 dark:border-red-800 rounded-md p-4 mb-6">
           <h3 className="text-red-800 dark:text-red-300 font-medium">Error</h3>
           <p className="text-red-700 dark:text-red-400 text-sm mt-1">{error}</p>
+          {isAuthenticated && error.includes("API credentials") && onConfigureApi && (
+            <Button 
+              onClick={onConfigureApi}
+              variant="outline"
+              size="sm"
+              className="flex items-center mt-2"
+            >
+              <Key className="mr-1 h-4 w-4" />
+              Configure API Keys
+            </Button>
+          )}
         </div>
       )}
       
@@ -110,6 +136,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           onRefresh={onRefresh}
           onReconnect={onReconnect}
           lastDataRefresh={lastDataRefresh}
+          onConfigureApi={isAuthenticated ? onConfigureApi : undefined}
         />
         
         <AccountOverview 

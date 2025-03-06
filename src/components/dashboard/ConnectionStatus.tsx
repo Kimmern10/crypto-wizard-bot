@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw, Activity } from 'lucide-react';
+import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw, Activity, Key } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { checkKrakenProxyStatus } from '@/utils/websocketManager';
@@ -18,6 +17,7 @@ interface ConnectionStatusProps {
   onRefresh: () => void;
   onReconnect: () => void;
   lastDataRefresh: string;
+  onConfigureApi?: () => void;
 }
 
 const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
@@ -30,7 +30,8 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   attemptingReconnect,
   onRefresh,
   onReconnect,
-  lastDataRefresh
+  lastDataRefresh,
+  onConfigureApi
 }) => {
   const [isCheckingProxy, setIsCheckingProxy] = React.useState(false);
   const [lastHeartbeat, setLastHeartbeat] = React.useState<Date>(new Date());
@@ -161,21 +162,39 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
               {attemptingReconnect ? 'Reconnecting...' : 'Restart connection'}
             </Button>
           </div>
-          <Button
-            onClick={handleCheckProxy}
-            className="w-full text-xs py-1 h-auto mt-1"
-            variant="secondary"
-            size="sm"
-            disabled={isCheckingProxy}
-          >
-            {isCheckingProxy ? 'Checking API Proxy...' : 'Check API Connection'}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleCheckProxy}
+              className="w-full text-xs py-1 h-auto"
+              variant="secondary"
+              size="sm"
+              disabled={isCheckingProxy}
+            >
+              {isCheckingProxy ? 'Checking...' : 'Check API Connection'}
+            </Button>
+            
+            {onConfigureApi && isDemo && (
+              <Button 
+                onClick={onConfigureApi}
+                className="w-full text-xs py-1 h-auto"
+                variant="default"
+                size="sm"
+              >
+                <Key className="h-3 w-3 mr-1" />
+                API Keys
+              </Button>
+            )}
+          </div>
+          
           {isDemo && (
             <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-md text-xs text-amber-800 dark:text-amber-400">
               <div className="flex items-start gap-1">
                 <Server className="h-3 w-3 mt-0.5 flex-shrink-0" />
                 <span>
-                  Currently in Demo Mode with simulated data. Your API credentials may not be connected.
+                  Currently in Demo Mode with simulated data.
+                  {onConfigureApi 
+                    ? ' Configure your API credentials to access real-time data.' 
+                    : ' Your API credentials may not be connected.'}
                 </span>
               </div>
             </div>

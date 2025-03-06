@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { useTradingContext } from '@/hooks/useTradingContext';
 import { toast } from "sonner";
@@ -7,6 +6,7 @@ import { Loader2, LogIn } from 'lucide-react';
 import { useConnectionState } from '@/hooks/useConnectionState';
 import { Button } from "@/components/ui/button";
 import { supabase } from '@/integrations/supabase/client';
+import ApiKeyModal from './ApiKeyModal';
 
 const Dashboard: React.FC = () => {
   const { 
@@ -28,7 +28,6 @@ const Dashboard: React.FC = () => {
     showApiKeyModal
   } = useTradingContext();
   
-  // Use the enhanced connection state hook
   const { 
     isInitializing, 
     isRestarting, 
@@ -45,7 +44,6 @@ const Dashboard: React.FC = () => {
   const [attemptingReconnect, setAttemptingReconnect] = useState(false);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
 
-  // Check auth status when component mounts
   useEffect(() => {
     const checkAuthStatus = async () => {
       const { data } = await supabase.auth.getSession();
@@ -55,32 +53,26 @@ const Dashboard: React.FC = () => {
     checkAuthStatus();
   }, []);
 
-  // Get the latest prices from ticker data or use defaults
   const btcPrice = lastTickerData['XBT/USD']?.c?.[0] ? parseFloat(lastTickerData['XBT/USD'].c[0]) : 36750;
   const ethPrice = lastTickerData['ETH/USD']?.c?.[0] ? parseFloat(lastTickerData['ETH/USD'].c[0]) : 2470;
   
-  // Calculate total balance value in USD with proper validation
   const totalBalanceUSD = (
     (currentBalance.USD || 0) + 
     ((currentBalance.BTC || 0) * btcPrice) + 
     ((currentBalance.ETH || 0) * ethPrice)
   );
 
-  // Format timestamp for last refresh
   const formattedLastRefresh = lastDataRefresh 
     ? (lastDataRefresh instanceof Date ? lastDataRefresh.toLocaleTimeString() : 'Unknown format')
     : 'Never';
 
-  // Check if we're in demo mode or real mode
   useEffect(() => {
-    // Update the demo state based on the connection status and WebSocket state
     if (isDemoMode || connectionStatus.toLowerCase().includes('demo')) {
       setIsDemo(true);
     } else {
       setIsDemo(false);
     }
     
-    // Check for CORS issues in the connection status
     if (
       connectionStatus.toLowerCase().includes('cors') || 
       (proxyAvailable === false && !isConnected)
@@ -92,7 +84,6 @@ const Dashboard: React.FC = () => {
     }
   }, [lastTickerData, connectionStatus, isDemoMode, isConnected, proxyAvailable]);
   
-  // Debug connection status
   useEffect(() => {
     console.log('Dashboard detected connection status:', isConnected ? 'Connected' : 'Disconnected');
     console.log('API configuration status:', isApiConfigured ? 'Configured' : 'Not configured');
@@ -118,7 +109,6 @@ const Dashboard: React.FC = () => {
     canUseAuthenticatedEndpoints
   ]);
 
-  // Handle refresh button click with better state management
   const handleRefresh = () => {
     console.log('Manually refreshing data...');
     setRefreshing(true);
@@ -138,7 +128,6 @@ const Dashboard: React.FC = () => {
       });
   };
   
-  // Handle reconnect button click with better state management
   const handleReconnect = () => {
     console.log('Manually restarting connection...');
     setAttemptingReconnect(true);
@@ -146,7 +135,6 @@ const Dashboard: React.FC = () => {
     restartConnection()
       .then(() => {
         toast.success('Connection restarted successfully');
-        // After successful reconnection, refresh data
         return refreshData();
       })
       .then(() => {
@@ -163,7 +151,6 @@ const Dashboard: React.FC = () => {
       });
   };
   
-  // Handle login click - redirect to auth page
   const handleLogin = async () => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google'
@@ -177,7 +164,6 @@ const Dashboard: React.FC = () => {
     }
   };
   
-  // If user is not authenticated, show login prompt
   if (showAuthPrompt && !isAuthenticated && !isInitializing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
@@ -219,7 +205,6 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  // Show loading state while initially loading
   if ((isLoading && !isRefreshing && !refreshing && !attemptingReconnect) || isInitializing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
@@ -235,26 +220,30 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <DashboardLayout
-      isConnected={isConnected || wsConnected}
-      isDemo={isDemo}
-      isAuthenticated={isAuthenticated}
-      corsBlocked={corsBlocked}
-      connectionStatus={connectionStatus}
-      lastConnectionEvent={lastConnectionEvent}
-      activePositions={activePositions}
-      lastTickerData={lastTickerData}
-      totalBalanceUSD={totalBalanceUSD}
-      dailyChangePercent={dailyChangePercent}
-      refreshing={refreshing || isRefreshing || isRestarting}
-      attemptingReconnect={attemptingReconnect}
-      onRefresh={handleRefresh}
-      onReconnect={handleReconnect}
-      onLogin={handleLogin}
-      onConfigureApi={showApiKeyModal}
-      lastDataRefresh={formattedLastRefresh}
-      error={error}
-    />
+    <>
+      <DashboardLayout
+        isConnected={isConnected || wsConnected}
+        isDemo={isDemo}
+        isAuthenticated={isAuthenticated}
+        corsBlocked={corsBlocked}
+        connectionStatus={connectionStatus}
+        lastConnectionEvent={lastConnectionEvent}
+        activePositions={activePositions}
+        lastTickerData={lastTickerData}
+        totalBalanceUSD={totalBalanceUSD}
+        dailyChangePercent={dailyChangePercent}
+        refreshing={refreshing || isRefreshing || isRestarting}
+        attemptingReconnect={attemptingReconnect}
+        onRefresh={handleRefresh}
+        onReconnect={handleReconnect}
+        onLogin={handleLogin}
+        onConfigureApi={showApiKeyModal}
+        lastDataRefresh={formattedLastRefresh}
+        error={error}
+      />
+      
+      <ApiKeyModal />
+    </>
   );
 };
 
