@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, Info } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 
@@ -20,6 +20,16 @@ const AuthPage = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { signIn, signUp, isLoading } = useAuth();
   const navigate = useNavigate();
+
+  // Pre-fill admin credentials for demo purposes
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('demo') === 'true') {
+      setEmail('admin@tradingplatform.com');
+      setPassword('AdminTradingPlatform123');
+      setActiveTab('login');
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +46,12 @@ const AuthPage = () => {
       
       if (error) {
         console.error('Login error:', error);
-        setErrorMessage(error.message || 'Failed to sign in');
+        // Better error message handling
+        if (error.message) {
+          setErrorMessage(error.message);
+        } else {
+          setErrorMessage('Failed to sign in. Please check your credentials and try again.');
+        }
         return;
       }
       
@@ -44,7 +59,7 @@ const AuthPage = () => {
       navigate('/dashboard');
     } catch (err) {
       console.error('Unexpected login error:', err);
-      setErrorMessage('An unexpected error occurred');
+      setErrorMessage('An unexpected error occurred. Please try again later.');
     } finally {
       setIsSubmitting(false);
     }
@@ -75,7 +90,11 @@ const AuthPage = () => {
       
       if (error) {
         console.error('Sign up error:', error);
-        setErrorMessage(error.message || 'Failed to sign up');
+        if (error.message) {
+          setErrorMessage(error.message);
+        } else {
+          setErrorMessage('Failed to sign up. Please try a different email or try again later.');
+        }
         return;
       }
       
@@ -88,7 +107,7 @@ const AuthPage = () => {
       setActiveTab('login');
     } catch (err) {
       console.error('Unexpected sign up error:', err);
-      setErrorMessage('An unexpected error occurred');
+      setErrorMessage('An unexpected error occurred. Please try again later.');
     } finally {
       setIsSubmitting(false);
     }
@@ -119,6 +138,13 @@ const AuthPage = () => {
                     <AlertDescription>{errorMessage}</AlertDescription>
                   </Alert>
                 )}
+                
+                <Alert variant="warning" className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
+                  <Info className="h-4 w-4 text-amber-500" />
+                  <AlertDescription className="text-amber-700 dark:text-amber-400">
+                    Demo account: admin@tradingplatform.com / AdminTradingPlatform123
+                  </AlertDescription>
+                </Alert>
                 
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>

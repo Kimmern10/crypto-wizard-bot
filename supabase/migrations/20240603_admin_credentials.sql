@@ -37,7 +37,7 @@ BEGIN
       'authenticated',
       'authenticated',
       'admin@tradingplatform.com',
-      crypt('AdminTradingPlatform123!', gen_salt('bf')),
+      crypt('AdminTradingPlatform123', gen_salt('bf')),
       now(),
       now(),
       now(),

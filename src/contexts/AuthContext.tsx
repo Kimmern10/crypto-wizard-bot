@@ -73,6 +73,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signIn = async (email: string, password: string) => {
     try {
       setIsLoading(true);
+      console.log(`Attempting to sign in with email: ${email}`);
+      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -83,6 +85,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return { error };
       }
       
+      console.log('Sign in successful:', data.user?.id);
       return { error: null };
     } catch (err) {
       console.error('Unexpected sign in error:', err);
@@ -99,6 +102,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth?signup=success`,
+        },
       });
       
       if (error) {
