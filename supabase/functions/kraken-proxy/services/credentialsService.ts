@@ -36,31 +36,25 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   try {
     console.log(`Fetching credentials for user ID: ${userId}`);
     
-    // Race the database query against the timeout
-    const credentialsPromise = supabase
+    // Use maybeSingle instead of single to prevent the PGRST116 error
+    const { data: credentials, error } = await supabase
       .from('api_credentials')
       .select('api_key, api_secret')
       .eq('user_id', userId)
       .eq('exchange', 'kraken')
-      .single();
+      .maybeSingle();
     
-    const { data: credentials, error } = await Promise.race([
-      credentialsPromise,
-      timeout
-    ]) as any;
-
     if (error) {
       console.error('Database error fetching credentials:', error);
-      
-      if (error.code === 'PGRST116') {
-        // This is the "no rows returned" error code
-        throw new Error('No API credentials found for this user');
-      }
-      
       throw new Error('Failed to fetch API credentials: ' + error.message);
     }
 
-    if (!credentials || !credentials.api_key || !credentials.api_secret) {
+    if (!credentials) {
+      console.error('No API credentials found for user ID:', userId);
+      throw new Error('No API credentials found for this user');
+    }
+
+    if (!credentials.api_key || !credentials.api_secret) {
       console.error('Invalid or incomplete credentials found for user ID:', userId);
       throw new Error('Invalid API credentials found');
     }
