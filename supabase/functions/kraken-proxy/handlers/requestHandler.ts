@@ -1,8 +1,9 @@
+
 import { corsHeaders } from "../utils/corsHeaders.ts";
 import { checkRateLimit } from "../utils/rateLimiter.ts";
 import { validateInput } from "../utils/validator.ts";
 import { isNonceValid } from "../utils/nonceManager.ts";
-import { createSignature } from "../utils/signatureGenerator.ts";
+import { createSignature, validateSignatureParams } from "../utils/signatureGenerator.ts";
 import { fetchCredentials } from "../services/credentialsService.ts";
 import { callKrakenApi, buildApiUrl, mapErrorToStatusCode } from "../services/krakenApiService.ts";
 import { API_VERSION } from "../config/apiConfig.ts";
@@ -13,7 +14,7 @@ const handleHealthCheck = (): Response => {
   return new Response(JSON.stringify({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    version: '1.2.0'
+    version: '1.2.1'
   }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     status: 200
@@ -26,7 +27,9 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     console.log('Proxy received request:', req.url);
     
     // Get client IP for rate limiting
-    const clientIp = req.headers.get('x-real-ip') || 'unknown';
+    const clientIp = req.headers.get('x-real-ip') || 
+                     req.headers.get('x-forwarded-for') || 
+                     'unknown';
     
     // Check IP-based rate limit first
     const ipRateLimit = checkRateLimit(clientIp, 'ip');
@@ -34,7 +37,8 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       console.warn(`Rate limit exceeded for IP ${clientIp}`);
       return new Response(
         JSON.stringify({ 
-          error: [`Rate limit exceeded. Try again in ${ipRateLimit.resetIn} seconds`] 
+          error: [`Rate limit exceeded. Try again in ${ipRateLimit.resetIn} seconds`],
+          remaining: ipRateLimit.remaining 
         }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
@@ -67,7 +71,7 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       return handleHealthCheck();
     }
     
-    const { path, method, isPrivate, data, userId } = requestData;
+    const { path, method, isPrivate, data, userId, forceDemoMode } = requestData;
     
     // Validate input parameters
     const inputValidation = validateInput(path, data || {});
@@ -78,7 +82,7 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       );
     }
     
-    console.log(`Processing request to ${path}, method: ${method || 'POST'}, private: ${isPrivate}`);
+    console.log(`Processing request to ${path}, method: ${method || 'POST'}, private: ${isPrivate}, demo: ${forceDemoMode ? 'yes' : 'no'}`);
 
     // User-based rate limiting for private endpoints
     if (isPrivate && userId) {
@@ -86,7 +90,8 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       if (!userRateLimit.allowed) {
         return new Response(
           JSON.stringify({ 
-            error: [`Rate limit exceeded. Try again in ${userRateLimit.resetIn} seconds`] 
+            error: [`Rate limit exceeded. Try again in ${userRateLimit.resetIn} seconds`],
+            remaining: userRateLimit.remaining 
           }),
           { 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
@@ -101,7 +106,7 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     let apiSecret = '';
 
     // For private endpoints, fetch API credentials from Supabase
-    if (isPrivate) {
+    if (isPrivate && !forceDemoMode) {
       if (!userId) {
         console.error('No user ID provided for private endpoint');
         return new Response(
@@ -118,10 +123,19 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         console.log('Successfully retrieved API credentials for user');
       } catch (error) {
         console.error('Error fetching credentials:', error);
-        return new Response(
-          JSON.stringify({ error: [error.message] }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: error.message.includes('No API credentials') ? 404 : 500 }
-        );
+        
+        // If demo mode was requested, continue without credentials
+        if (forceDemoMode) {
+          console.log('Proceeding with demo mode as requested');
+        } else {
+          return new Response(
+            JSON.stringify({ error: [error.message], demoModeAvailable: true }),
+            { 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+              status: error.message.includes('No API credentials') ? 404 : 500 
+            }
+          );
+        }
       }
     }
 
@@ -132,14 +146,23 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     const options: RequestInit = {
       method: method || 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'KrakenProxy/1.0'
       }
     };
 
     let bodyData = data || {};
     
+    // If demo mode is requested, add that flag
+    if (forceDemoMode) {
+      bodyData = {
+        ...bodyData,
+        forceDemoMode: 'true'
+      };
+    }
+    
     // Add authentication for private endpoints
-    if (isPrivate) {
+    if (isPrivate && !forceDemoMode) {
       // Create nonce for authentication with microsecond precision
       const nonce = (Date.now() * 1000 + Math.floor(Math.random() * 1000)).toString();
       
@@ -158,6 +181,14 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       }
       
       try {
+        // Validate signature parameters
+        if (!validateSignatureParams(`/${API_VERSION}/private/${path}`, nonce, apiSecret)) {
+          return new Response(
+            JSON.stringify({ error: ['Invalid signature parameters'] }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          );
+        }
+        
         // Create signature with the API_VERSION properly imported
         const signature = createSignature(`/${API_VERSION}/private/${path}`, nonce, bodyData, apiSecret);
         
@@ -189,6 +220,21 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     try {
       const { data: responseData, status } = await callKrakenApi(apiUrl, options);
       
+      // Add rate limit information to the response headers
+      const responseHeaders = { 
+        ...corsHeaders, 
+        'Content-Type': 'application/json',
+        'X-RateLimit-Remaining-IP': ipRateLimit.remaining.toString(),
+        'X-RateLimit-Reset-IP': ipRateLimit.resetIn.toString()
+      };
+      
+      // If userId is available, add user rate limit information
+      if (userId) {
+        const userRateLimit = checkRateLimit(userId, 'user');
+        responseHeaders['X-RateLimit-Remaining-User'] = userRateLimit.remaining.toString();
+        responseHeaders['X-RateLimit-Reset-User'] = userRateLimit.resetIn.toString();
+      }
+      
       // Check if Kraken API returned an error
       if (responseData.error && responseData.error.length > 0) {
         console.error(`Kraken API returned error: ${JSON.stringify(responseData.error)}`);
@@ -198,20 +244,30 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         const statusCode = mapErrorToStatusCode(errorMsg);
         
         return new Response(JSON.stringify(responseData), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: responseHeaders,
           status: statusCode
         });
       }
 
       // Return data with CORS headers
       return new Response(JSON.stringify(responseData), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: responseHeaders,
         status
       });
     } catch (error) {
+      // Determine appropriate status code based on error message
+      let statusCode = 502; // Default to bad gateway
+      
+      if (error.message.includes('timed out')) {
+        statusCode = 408; // Request timeout
+      }
+      
       return new Response(
-        JSON.stringify({ error: [error.message] }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: error.message.includes('timed out') ? 408 : 502 }
+        JSON.stringify({ 
+          error: [error.message],
+          timestamp: new Date().toISOString() 
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: statusCode }
       );
     }
   } catch (error) {

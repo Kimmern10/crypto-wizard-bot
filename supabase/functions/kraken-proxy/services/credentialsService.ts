@@ -1,8 +1,14 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Interface for credentials response
+interface CredentialsResponse {
+  apiKey: string;
+  apiSecret: string;
+}
+
 // Service to fetch API credentials from Supabase
-export const fetchCredentials = async (userId: string): Promise<{ apiKey: string; apiSecret: string }> => {
+export const fetchCredentials = async (userId: string): Promise<CredentialsResponse> => {
   // Get Supabase URL and key from environment variables
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY');
@@ -55,10 +61,13 @@ export const fetchCredentials = async (userId: string): Promise<{ apiKey: string
     const apiKey = credentials.api_key;
     const apiSecret = credentials.api_secret;
     
-    if (!apiKey || !apiSecret) {
-      console.error('Invalid API credentials (empty key or secret)');
-      throw new Error('API key or secret is missing or invalid');
+    if (!validateCredentials(apiKey, apiSecret)) {
+      console.error('Invalid API credentials');
+      throw new Error('API key or secret is invalid');
     }
+    
+    // Don't log actual credentials - only log that they were found
+    console.log('Successfully retrieved API credentials for user');
     
     return { apiKey, apiSecret };
   } catch (error) {
@@ -89,4 +98,3 @@ export const validateCredentials = (apiKey: string, apiSecret: string): boolean 
   
   return true;
 };
-

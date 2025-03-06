@@ -16,7 +16,7 @@ export const MAX_RETRIES = 2;
 // Delay between retries in milliseconds
 export const RETRY_DELAY = 1000;
 
-// Rate limits configuration
+// Rate limits configuration - used by rateLimiter.ts
 export const RATE_LIMITS = {
   ip: {
     requests: 30,
@@ -26,4 +26,15 @@ export const RATE_LIMITS = {
     requests: 20,
     window: 60 // 60 seconds window
   }
+};
+
+// Demo mode configuration
+export const DEMO_MODE_CONFIG = {
+  enabled: false,
+  balances: {
+    USD: 10000,
+    BTC: 0.5,
+    ETH: 5
+  },
+  defaultLatency: 800 // simulate network latency in ms
 };

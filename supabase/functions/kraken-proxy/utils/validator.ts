@@ -1,37 +1,69 @@
 
-// Validate input parameters
-export const validateInput = (path: string, data: any): { valid: boolean; errors?: string[] } => {
-  if (!path) {
-    return { valid: false, errors: ['Missing required parameter: path'] };
+// Validate API input parameters to prevent injection or malformed requests
+export const validateInput = (
+  path: string,
+  data: Record<string, any>
+): { valid: boolean; errors: string[] } => {
+  const errors: string[] = [];
+  
+  // Basic path validation
+  if (!path || typeof path !== 'string') {
+    errors.push('API path is required');
+  } else if (!/^[a-zA-Z0-9\/\-_]+$/.test(path)) {
+    errors.push('API path contains invalid characters');
   }
   
-  // Validate specific endpoints
-  if (path === 'private/AddOrder') {
-    const requiredFields = ['pair', 'type', 'ordertype', 'volume'];
-    const missingFields = requiredFields.filter(field => !data[field]);
-    
-    if (missingFields.length > 0) {
-      return { 
-        valid: false, 
-        errors: [`Missing required order parameters: ${missingFields.join(', ')}`] 
-      };
+  // Validate all data fields recursively
+  validateObject(data, errors);
+  
+  // Check specific endpoints for required parameters
+  if (path) {
+    if (path.includes('AddOrder') && !data.ordertype) {
+      errors.push('Order type is required for AddOrder');
     }
     
-    // Validate order type
-    if (!['buy', 'sell'].includes(data.type)) {
-      return { valid: false, errors: ['Invalid order type. Must be "buy" or "sell"'] };
+    if (path.includes('AddOrder') && !data.pair) {
+      errors.push('Trading pair is required for AddOrder');
     }
     
-    // Validate ordertype
-    if (!['market', 'limit'].includes(data.ordertype)) {
-      return { valid: false, errors: ['Invalid ordertype. Must be "market" or "limit"'] };
+    if (path.includes('AddOrder') && !data.type) {
+      errors.push('Trade type (buy/sell) is required for AddOrder');
     }
     
-    // For limit orders, price is required
-    if (data.ordertype === 'limit' && !data.price) {
-      return { valid: false, errors: ['Price is required for limit orders'] };
+    if (path.includes('AddOrder') && !data.volume) {
+      errors.push('Volume is required for AddOrder');
     }
   }
   
-  return { valid: true };
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+};
+
+// Helper to validate an object recursively
+const validateObject = (obj: Record<string, any>, errors: string[]) => {
+  if (!obj || typeof obj !== 'object') {
+    return;
+  }
+  
+  // Check each field in the object
+  for (const [key, value] of Object.entries(obj)) {
+    // Check for injection attempts in keys
+    if (!/^[a-zA-Z0-9_\-.]+$/.test(key)) {
+      errors.push(`Invalid character in parameter name: ${key}`);
+    }
+    
+    // For string values, check for possible injection patterns
+    if (typeof value === 'string') {
+      if (value.includes('<script>') || value.includes('javascript:') || value.includes('data:text/html')) {
+        errors.push(`Suspicious script content detected in parameter: ${key}`);
+      }
+    }
+    
+    // Recursively check nested objects
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      validateObject(value, errors);
+    }
+  }
 };

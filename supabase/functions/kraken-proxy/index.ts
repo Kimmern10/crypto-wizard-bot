@@ -1,6 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { corsHeaders } from "./utils/corsHeaders.ts";
+import { corsHeaders, handleCorsPreflightRequest } from "./utils/corsHeaders.ts";
 import { handleRequest } from "./handlers/requestHandler.ts";
 
 serve(async (req) => {
@@ -8,7 +8,7 @@ serve(async (req) => {
   
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return handleCorsPreflightRequest();
   }
   
   try {
@@ -20,7 +20,7 @@ serve(async (req) => {
           status: 'ok', 
           time: new Date().toISOString(),
           message: 'Kraken proxy is operational',
-          version: '1.0.1' // Added version for tracking
+          version: '1.1.0' // Added version for tracking
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
