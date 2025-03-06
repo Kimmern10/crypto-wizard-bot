@@ -20,7 +20,7 @@ serve(async (req) => {
           status: 'ok', 
           time: new Date().toISOString(),
           message: 'Kraken proxy is operational',
-          version: '1.1.0' // Added version for tracking
+          version: '1.2.1' // Updated version for tracking
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -53,7 +53,8 @@ serve(async (req) => {
         error: [errorMessage], 
         result: null,
         _isDemo: true,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        demoModeAvailable: true
       }),
       { 
         status: statusCode, 

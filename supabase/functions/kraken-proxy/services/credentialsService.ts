@@ -36,32 +36,43 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   try {
     console.log(`Fetching credentials for user ID: ${userId}`);
     
-    // Try with a direct query first and log the full response for debugging
-    const { data: testData, error: testError } = await supabase
+    // First check if the credentials exist at all
+    const { data: checkData, error: checkError } = await supabase
       .from('api_credentials')
-      .select('*')
-      .eq('user_id', userId);
+      .select('id')
+      .eq('user_id', userId)
+      .eq('exchange', 'kraken')
+      .maybeSingle();
       
-    console.log('Test query results for debugging:');
-    console.log('Data:', testData ? JSON.stringify(testData) : 'null');
-    console.log('Error:', testError ? JSON.stringify(testError) : 'null');
-    console.log('Row count:', testData ? testData.length : 0);
+    console.log('Initial check query results:');
+    console.log('Check Data:', checkData ? 'Found' : 'Not found');
+    console.log('Check Error:', checkError ? JSON.stringify(checkError) : 'null');
     
-    // Use maybeSingle instead of single to prevent the PGRST116 error
+    if (checkError) {
+      console.error('Error checking for credentials existence:', checkError);
+      throw new Error(`Database error: ${checkError.message}`);
+    }
+    
+    if (!checkData) {
+      console.error('No API credentials found for user ID:', userId);
+      throw new Error('No API credentials found for this user');
+    }
+    
+    // Try with a direct query for the actual credentials
     const { data: credentials, error } = await Promise.race([
       supabase
         .from('api_credentials')
         .select('api_key, api_secret')
         .eq('user_id', userId)
         .eq('exchange', 'kraken')
-        .maybeSingle(),
+        .single(),
       timeout
     ]);
     
-    // Log the actual credentials query response for debugging
+    // Log the credentials query result (without revealing the actual credentials)
     console.log('Credentials query result:');
-    console.log('Data:', credentials ? 'Found' : 'Not found');
-    console.log('Error:', error ? JSON.stringify(error) : 'null');
+    console.log('Data found:', credentials ? 'Yes' : 'No');
+    console.log('Error:', error ? error.message : 'null');
     
     if (error) {
       console.error('Database error fetching credentials:', error);
@@ -95,13 +106,6 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
     
     if (error.message && error.message.includes('timed out')) {
       throw new Error('Database operation timed out: Failed to fetch API credentials');
-    }
-    
-    // Log Supabase client state if possible
-    try {
-      console.log('Supabase client state:', supabase ? 'exists' : 'null');
-    } catch (e) {
-      console.error('Could not log Supabase client state:', e);
     }
     
     // Re-throw the original error to preserve the message
