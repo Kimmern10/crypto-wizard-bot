@@ -3,7 +3,6 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders } from "./utils/corsHeaders.ts";
 import { handleRequest } from "./handlers/requestHandler.ts";
 
-// Main function handler for all Kraken API proxy requests
 serve(async (req) => {
   console.log(`Kraken-proxy function received ${req.method} request`);
   
@@ -20,7 +19,8 @@ serve(async (req) => {
         JSON.stringify({ 
           status: 'ok', 
           time: new Date().toISOString(),
-          message: 'Kraken proxy is operational'
+          message: 'Kraken proxy is operational',
+          version: '1.0.1' // Added version for tracking
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -52,7 +52,8 @@ serve(async (req) => {
       JSON.stringify({ 
         error: [errorMessage], 
         result: null,
-        _isDemo: true 
+        _isDemo: true,
+        timestamp: new Date().toISOString()
       }),
       { 
         status: statusCode, 

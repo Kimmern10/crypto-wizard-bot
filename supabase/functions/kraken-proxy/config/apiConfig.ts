@@ -15,3 +15,15 @@ export const MAX_RETRIES = 2;
 
 // Delay between retries in milliseconds
 export const RETRY_DELAY = 1000;
+
+// Rate limits configuration
+export const RATE_LIMITS = {
+  ip: {
+    requests: 30,
+    window: 60 // 60 seconds window
+  },
+  user: {
+    requests: 20,
+    window: 60 // 60 seconds window
+  }
+};

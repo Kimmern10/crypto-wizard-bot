@@ -1,4 +1,3 @@
-
 import { corsHeaders } from "../utils/corsHeaders.ts";
 import { checkRateLimit } from "../utils/rateLimiter.ts";
 import { validateInput } from "../utils/validator.ts";
@@ -27,12 +26,12 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     console.log('Proxy received request:', req.url);
     
     // Get client IP for rate limiting
-    // Note: In production, you'd use proper headers like 'X-Forwarded-For'
     const clientIp = req.headers.get('x-real-ip') || 'unknown';
     
     // Check IP-based rate limit first
     const ipRateLimit = checkRateLimit(clientIp, 'ip');
     if (!ipRateLimit.allowed) {
+      console.warn(`Rate limit exceeded for IP ${clientIp}`);
       return new Response(
         JSON.stringify({ 
           error: [`Rate limit exceeded. Try again in ${ipRateLimit.resetIn} seconds`] 
@@ -104,6 +103,7 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     // For private endpoints, fetch API credentials from Supabase
     if (isPrivate) {
       if (!userId) {
+        console.error('No user ID provided for private endpoint');
         return new Response(
           JSON.stringify({ error: ['User ID is required for private endpoints'] }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
@@ -114,7 +114,10 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         const credentials = await fetchCredentials(userId);
         apiKey = credentials.apiKey;
         apiSecret = credentials.apiSecret;
+        
+        console.log('Successfully retrieved API credentials for user');
       } catch (error) {
+        console.error('Error fetching credentials:', error);
         return new Response(
           JSON.stringify({ error: [error.message] }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: error.message.includes('No API credentials') ? 404 : 500 }

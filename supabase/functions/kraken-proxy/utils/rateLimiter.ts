@@ -1,49 +1,37 @@
 
-import { RATE_LIMITS } from "../config/apiConfig.ts";
+import { RATE_LIMITS } from '../config/apiConfig.ts';
 
-// Rate limiting state storage
-// Note: This will reset on function restart. For production, use KV store or similar
-const rateLimitState: {
-  [key: string]: {
-    count: number;
-    resetAt: number;
-  }
-} = {};
+// Simple in-memory rate limiting store
+const ipLimitStore: Record<string, { count: number; lastReset: number }> = {};
+const userLimitStore: Record<string, { count: number; lastReset: number }> = {};
 
-// Function to enforce rate limits
-export const checkRateLimit = (identifier: string, type: 'ip' | 'user'): { allowed: boolean; resetIn?: number } => {
+// Check if a request should be rate limited
+export const checkRateLimit = (
+  identifier: string,
+  type: 'ip' | 'user'
+): { allowed: boolean; resetIn: number } => {
+  const store = type === 'ip' ? ipLimitStore : userLimitStore;
+  const limits = type === 'ip' ? RATE_LIMITS.ip : RATE_LIMITS.user;
   const now = Date.now();
-  const minuteKey = `${identifier}_${type}_minute`;
-  const hourKey = `${identifier}_${type}_hour`;
-  
-  // Initialize or reset counters if needed
-  if (!rateLimitState[minuteKey] || rateLimitState[minuteKey].resetAt < now) {
-    rateLimitState[minuteKey] = { count: 0, resetAt: now + 60000 };
-  }
-  
-  if (!rateLimitState[hourKey] || rateLimitState[hourKey].resetAt < now) {
-    rateLimitState[hourKey] = { count: 0, resetAt: now + 3600000 };
-  }
-  
-  // Increment counters
-  rateLimitState[minuteKey].count++;
-  rateLimitState[hourKey].count++;
-  
-  // Check limits
-  const limits = RATE_LIMITS[type];
-  if (rateLimitState[minuteKey].count > limits.perMinute) {
-    return { 
-      allowed: false, 
-      resetIn: Math.ceil((rateLimitState[minuteKey].resetAt - now) / 1000)
+
+  // Initialize or reset counter if window has expired
+  if (!store[identifier] || now - store[identifier].lastReset >= limits.window * 1000) {
+    store[identifier] = {
+      count: 0,
+      lastReset: now
     };
   }
-  
-  if (rateLimitState[hourKey].count > limits.perHour) {
-    return {
-      allowed: false,
-      resetIn: Math.ceil((rateLimitState[hourKey].resetAt - now) / 1000)
-    };
+
+  // Increment counter
+  store[identifier].count++;
+
+  // Check if over limit
+  if (store[identifier].count > limits.requests) {
+    const resetIn = Math.ceil(
+      (store[identifier].lastReset + limits.window * 1000 - now) / 1000
+    );
+    return { allowed: false, resetIn };
   }
-  
-  return { allowed: true };
+
+  return { allowed: true, resetIn: 0 };
 };
