@@ -1,11 +1,10 @@
 
-import { WebSocketMessage } from './WebSocketMessage';
-
 export class WebSocketConnection {
   private socket: WebSocket | null = null;
   private url: string;
   private onMessageCallback: ((data: any) => void) | null = null;
   private reconnecting = false;
+  private closeIntentional = false;
   
   constructor(url: string) {
     this.url = url;
@@ -20,6 +19,7 @@ export class WebSocketConnection {
     return new Promise((resolve, reject) => {
       try {
         console.log(`Connecting to WebSocket at ${this.url}`);
+        this.closeIntentional = false;
         this.socket = new WebSocket(this.url);
         
         // Set a connection timeout
@@ -28,6 +28,7 @@ export class WebSocketConnection {
           
           if (this.socket) {
             try {
+              this.closeIntentional = true;
               this.socket.close();
               this.socket = null;
             } catch (e) {
@@ -58,20 +59,30 @@ export class WebSocketConnection {
         this.socket.onclose = (event) => {
           clearTimeout(connectionTimeout);
           console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
-          this.socket = null;
           
-          if (!this.reconnecting) {
+          // Only attempt automatic reconnection if this wasn't an intentional close
+          if (!this.closeIntentional && !this.reconnecting) {
+            console.log('Connection was closed unexpectedly, will attempt to reconnect');
             this.reconnecting = true;
+            
+            // Delay slightly before allowing reconnection attempts
             setTimeout(() => {
               this.reconnecting = false;
+              this.socket = null;
             }, 100);
+          } else {
+            this.socket = null;
           }
         };
         
         this.socket.onerror = (error) => {
           clearTimeout(connectionTimeout);
           console.error('WebSocket error:', error);
-          reject(error);
+          
+          // Don't reject if we're already closing intentionally
+          if (!this.closeIntentional) {
+            reject(error);
+          }
         };
       } catch (error) {
         console.error('Error creating WebSocket:', error);
@@ -87,7 +98,7 @@ export class WebSocketConnection {
     }
     
     try {
-      const messageStr = WebSocketMessage.formatOutgoing(message);
+      const messageStr = typeof message === 'string' ? message : JSON.stringify(message);
       console.log('Sending WebSocket message:', messageStr);
       this.socket.send(messageStr);
       return true;
@@ -104,8 +115,10 @@ export class WebSocketConnection {
   disconnect(): void {
     if (this.socket) {
       try {
+        this.closeIntentional = true;
         this.socket.close();
         this.socket = null;
+        console.log('WebSocket disconnected intentionally');
       } catch (error) {
         console.error('Error disconnecting WebSocket:', error);
         this.socket = null;

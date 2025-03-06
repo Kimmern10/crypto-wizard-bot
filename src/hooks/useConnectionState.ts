@@ -1,6 +1,11 @@
-
 import { useState, useEffect, useCallback } from 'react';
-import { getConnectionStatus, initializeWebSocket, restartWebSocket, checkKrakenProxyStatus } from '@/utils/websocketManager';
+import { 
+  getConnectionStatus, 
+  initializeWebSocket, 
+  restartWebSocket, 
+  checkKrakenProxyStatus,
+  cleanupWebSocketConnection
+} from '@/utils/websocketManager';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -12,6 +17,7 @@ export const useConnectionState = () => {
   const [proxyAvailable, setProxyAvailable] = useState<boolean | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [pingIntervalId, setPingIntervalId] = useState<number | null>(null);
   
   // Check authentication status on mount
   useEffect(() => {
@@ -56,7 +62,7 @@ export const useConnectionState = () => {
   // First initialization of WebSocket
   useEffect(() => {
     console.log('Initializing WebSocket connection...');
-    initializeWebSocket();
+    const socket = initializeWebSocket();
     
     // Check proxy availability on startup
     checkKrakenProxyStatus()
@@ -71,9 +77,30 @@ export const useConnectionState = () => {
       .finally(() => {
         setIsInitializing(false);
       });
+    
+    // Set up a ping interval to keep the connection alive
+    const intervalId = window.setInterval(() => {
+      const { isConnected } = getConnectionStatus();
+      if (!isConnected) {
+        console.log('Connection appears to be down, attempting to reconnect...');
+        socket.connect().catch(err => {
+          console.error('Auto-reconnect failed:', err);
+        });
+      }
+    }, 30000); // Check every 30 seconds
+    
+    setPingIntervalId(intervalId);
+    
+    // Use the centralized cleanup function when component unmounts
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      cleanupWebSocketConnection();
+    };
   }, []);
 
-  // Periodic connection check
+  // Periodic connection check with less frequency
   useEffect(() => {
     const connectionCheckInterval = setInterval(() => {
       setLastConnectionCheck(Date.now());
@@ -96,7 +123,7 @@ export const useConnectionState = () => {
             console.error('Error in periodic proxy check:', error);
           });
       }
-    }, 5000);
+    }, 10000); // 10 seconds instead of 5 to reduce CPU usage
     
     return () => clearInterval(connectionCheckInterval);
   }, [lastConnectionCheck, proxyAvailable]);

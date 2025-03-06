@@ -1,11 +1,11 @@
 
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw, Activity } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { checkKrakenProxyStatus } from '@/utils/websocketManager';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 interface ConnectionStatusProps {
   isConnected: boolean;
@@ -32,32 +32,37 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   onReconnect,
   lastDataRefresh
 }) => {
-  const { toast } = useToast();
   const [isCheckingProxy, setIsCheckingProxy] = React.useState(false);
+  const [lastHeartbeat, setLastHeartbeat] = React.useState<Date>(new Date());
+  
+  // Update heartbeat every 5 seconds
+  React.useEffect(() => {
+    const heartbeatInterval = setInterval(() => {
+      if (isConnected) {
+        setLastHeartbeat(new Date());
+      }
+    }, 5000);
+    
+    return () => clearInterval(heartbeatInterval);
+  }, [isConnected]);
   
   const handleCheckProxy = async () => {
     setIsCheckingProxy(true);
     try {
       const available = await checkKrakenProxyStatus();
       if (available) {
-        toast({
-          title: "Kraken API proxy is available",
-          description: "Connection to Kraken API should work properly.",
-          variant: "default" // Changed from 'success' to 'default'
+        toast.success("Kraken API proxy is available", {
+          description: "Connection to Kraken API should work properly."
         });
       } else {
-        toast({
-          title: "Kraken API proxy is unavailable",
-          description: "Check Supabase Edge Functions and deployment status.",
-          variant: "destructive"
+        toast.error("Kraken API proxy is unavailable", {
+          description: "Check Supabase Edge Functions and deployment status."
         });
       }
     } catch (error) {
       console.error("Error checking proxy:", error);
-      toast({
-        title: "Error checking proxy",
-        description: "Failed to check Kraken API proxy status.",
-        variant: "destructive"
+      toast.error("Error checking proxy", {
+        description: "Failed to check Kraken API proxy status."
       });
     } finally {
       setIsCheckingProxy(false);
@@ -77,15 +82,21 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
               <Server className="h-4 w-4 text-amber-500" />
             </div>
           ) : (
-            <Wifi className="h-4 w-4 text-green-600" />
+            <div className="flex items-center space-x-1">
+              <Wifi className="h-4 w-4 text-green-600" />
+              <Activity className="h-3 w-3 text-green-600 animate-pulse" />
+            </div>
           )
         ) : (
           <WifiOff className="h-4 w-4 text-red-600" />
         )}
       </CardHeader>
       <CardContent>
-        <div className="text-sm font-medium">
-          {connectionStatus}
+        <div className="text-sm font-medium flex items-center justify-between">
+          <span>{connectionStatus}</span>
+          {isConnected && <span className="text-xs text-muted-foreground">
+            Heartbeat: {lastHeartbeat.toLocaleTimeString()}
+          </span>}
         </div>
         <p className="text-xs text-muted-foreground mt-1">
           {lastConnectionEvent || 'No connection events yet'}

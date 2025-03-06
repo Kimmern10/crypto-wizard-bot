@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 // Track initialization status
 let isInitialized = false;
 let isProxyAvailable = false;
+let checkProxyTimer: number | null = null;
 
 // Export a function to check for availability of the Kraken proxy
 export const checkKrakenProxyStatus = async (): Promise<boolean> => {
@@ -30,6 +31,29 @@ export const checkKrakenProxyStatus = async (): Promise<boolean> => {
   }
 };
 
+// Periodically check proxy availability in the background
+const startPeriodicProxyCheck = () => {
+  if (checkProxyTimer) {
+    clearInterval(checkProxyTimer);
+  }
+  
+  // Check every 2 minutes
+  checkProxyTimer = window.setInterval(async () => {
+    const prevStatus = isProxyAvailable;
+    const newStatus = await checkKrakenProxyStatus();
+    
+    if (prevStatus !== newStatus && newStatus) {
+      // Only notify if proxy becomes available after being unavailable
+      toast.success('Kraken API proxy is now available', {
+        description: 'Connection to Kraken API should work properly now.'
+      });
+      
+      // Try to restart the connection if proxy becomes available
+      restartWebSocket();
+    }
+  }, 120000); // 2 minutes
+};
+
 // Export a function to initialize the WebSocket connection
 export const initializeWebSocket = () => {
   // Prevent multiple initialization
@@ -40,6 +64,9 @@ export const initializeWebSocket = () => {
   
   console.log('Initializing WebSocket connection...');
   const ws = getKrakenWebSocket();
+  
+  // Add a failure count to handle reconnection issues
+  let connectionFailures = 0;
   
   // Check proxy availability
   checkKrakenProxyStatus().then(available => {
@@ -58,12 +85,29 @@ export const initializeWebSocket = () => {
     }
     
     // Continue with WebSocket connection regardless of proxy status
-    return ws.connect();
-  })
-  .catch(error => {
-    console.error('Failed to initialize WebSocket connection:', error);
-    // Don't enable demo mode here - let the connection utils handle that decision
+    return ws.connect().catch(error => {
+      console.error('Initial WebSocket connection failed:', error);
+      connectionFailures++;
+      
+      // Retry with a delay
+      setTimeout(() => {
+        console.log('Retrying WebSocket connection...');
+        ws.connect().catch(err => {
+          console.error('Retry connection failed:', err);
+          connectionFailures++;
+          
+          // If we've failed multiple times, switch to demo mode
+          if (connectionFailures >= 3) {
+            console.log('Multiple connection failures, switching to demo mode');
+            ws.setForceDemoMode(true);
+          }
+        });
+      }, 3000); // 3 second delay before retry
+    });
   });
+  
+  // Start periodic proxy availability check
+  startPeriodicProxyCheck();
   
   isInitialized = true;
   return ws;
@@ -126,6 +170,24 @@ export const checkWebSocketStatus = () => {
     activeSubscriptions: ws.getActiveSubscriptions(),
     isInitialized
   };
+};
+
+// Cleanup function to be called when the application unmounts
+export const cleanupWebSocketConnection = () => {
+  if (checkProxyTimer) {
+    clearInterval(checkProxyTimer);
+    checkProxyTimer = null;
+  }
+  
+  const ws = getKrakenWebSocket();
+  if (ws) {
+    // Use the new cleanup method if available
+    if (typeof ws.cleanup === 'function') {
+      ws.cleanup();
+    } else {
+      ws.disconnect();
+    }
+  }
 };
 
 export { 

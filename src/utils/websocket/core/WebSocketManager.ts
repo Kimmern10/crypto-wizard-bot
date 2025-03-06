@@ -21,6 +21,8 @@ export class WebSocketManager {
   private subscriptions: WebSocketSubscriptions;
   private messageHandler: WebSocketMessageHandler;
   private reconnection: WebSocketReconnection;
+  private reconnectOnVisibilityChange: boolean = true;
+  private tabVisibilityListener: ((event: Event) => void) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -41,7 +43,32 @@ export class WebSocketManager {
     this.demoMode.setNotifyHandler((message) => this.messageHandler.notify(message));
     this.reconnection.setNotifyHandler((message) => this.messageHandler.notify(message));
     
+    // Set up visibility change listener
+    this.setupVisibilityChangeListener();
+    
     console.log(`WebSocketManager initialized with URL: ${url}`);
+  }
+
+  private setupVisibilityChangeListener() {
+    if (typeof document !== 'undefined') {
+      this.tabVisibilityListener = async () => {
+        if (!this.reconnectOnVisibilityChange) return;
+        
+        if (document.visibilityState === 'visible') {
+          console.log('Tab became visible, checking WebSocket connection...');
+          if (!this.connection.isConnected() && !this.reconnection.isAttemptingConnection()) {
+            console.log('Connection lost while tab was hidden, reconnecting...');
+            try {
+              await this.connect();
+            } catch (error) {
+              console.error('Error reconnecting on visibility change:', error);
+            }
+          }
+        }
+      };
+      
+      document.addEventListener('visibilitychange', this.tabVisibilityListener);
+    }
   }
 
   setConnectionAttempts(maxAttempts: number): void {
@@ -240,5 +267,17 @@ export class WebSocketManager {
   
   clearSubscriptionCache(): void {
     this.subscriptions.clearMessageDebounce();
+  }
+
+  // Clean up all event listeners
+  cleanup(): void {
+    // Remove visibility change listener
+    if (typeof document !== 'undefined' && this.tabVisibilityListener) {
+      document.removeEventListener('visibilitychange', this.tabVisibilityListener);
+      this.tabVisibilityListener = null;
+    }
+    
+    // Disconnect the WebSocket
+    this.disconnect();
   }
 }
