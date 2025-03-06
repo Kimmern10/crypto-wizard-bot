@@ -36,13 +36,32 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   try {
     console.log(`Fetching credentials for user ID: ${userId}`);
     
-    // Use maybeSingle instead of single to prevent the PGRST116 error
-    const { data: credentials, error } = await supabase
+    // Try with a direct query first and log the full response for debugging
+    const { data: testData, error: testError } = await supabase
       .from('api_credentials')
-      .select('api_key, api_secret')
-      .eq('user_id', userId)
-      .eq('exchange', 'kraken')
-      .maybeSingle();
+      .select('*')
+      .eq('user_id', userId);
+      
+    console.log('Test query results for debugging:');
+    console.log('Data:', testData ? JSON.stringify(testData) : 'null');
+    console.log('Error:', testError ? JSON.stringify(testError) : 'null');
+    console.log('Row count:', testData ? testData.length : 0);
+    
+    // Use maybeSingle instead of single to prevent the PGRST116 error
+    const { data: credentials, error } = await Promise.race([
+      supabase
+        .from('api_credentials')
+        .select('api_key, api_secret')
+        .eq('user_id', userId)
+        .eq('exchange', 'kraken')
+        .maybeSingle(),
+      timeout
+    ]);
+    
+    // Log the actual credentials query response for debugging
+    console.log('Credentials query result:');
+    console.log('Data:', credentials ? 'Found' : 'Not found');
+    console.log('Error:', error ? JSON.stringify(error) : 'null');
     
     if (error) {
       console.error('Database error fetching credentials:', error);
@@ -76,6 +95,13 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
     
     if (error.message && error.message.includes('timed out')) {
       throw new Error('Database operation timed out: Failed to fetch API credentials');
+    }
+    
+    // Log Supabase client state if possible
+    try {
+      console.log('Supabase client state:', supabase ? 'exists' : 'null');
+    } catch (e) {
+      console.error('Could not log Supabase client state:', e);
     }
     
     // Re-throw the original error to preserve the message
