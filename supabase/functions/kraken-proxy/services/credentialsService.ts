@@ -33,15 +33,16 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
     }, 10000); // 10 seconds timeout
   });
   
-  // Fetch API credentials for Kraken from the database
   try {
+    console.log(`Fetching credentials for user ID: ${userId}`);
+    
     // Race the database query against the timeout
     const credentialsPromise = supabase
       .from('api_credentials')
       .select('api_key, api_secret')
       .eq('user_id', userId)
       .eq('exchange', 'kraken')
-      .maybeSingle();
+      .single();
     
     const { data: credentials, error } = await Promise.race([
       credentialsPromise,
@@ -50,32 +51,41 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
 
     if (error) {
       console.error('Database error fetching credentials:', error);
+      
+      if (error.code === 'PGRST116') {
+        // This is the "no rows returned" error code
+        throw new Error('No API credentials found for this user');
+      }
+      
       throw new Error('Failed to fetch API credentials: ' + error.message);
     }
 
-    if (!credentials) {
-      console.error('No API credentials found for userId:', userId);
-      throw new Error('No API credentials found for this user');
+    if (!credentials || !credentials.api_key || !credentials.api_secret) {
+      console.error('Invalid or incomplete credentials found for user ID:', userId);
+      throw new Error('Invalid API credentials found');
     }
 
     const apiKey = credentials.api_key;
     const apiSecret = credentials.api_secret;
     
     if (!validateCredentials(apiKey, apiSecret)) {
-      console.error('Invalid API credentials');
+      console.error('Invalid API credentials format');
       throw new Error('API key or secret is invalid');
     }
     
-    // Don't log actual credentials - only log that they were found
-    console.log('Successfully retrieved API credentials for user');
+    // Log success but not the actual credentials
+    console.log(`Successfully retrieved API credentials for user ID: ${userId}`);
     
     return { apiKey, apiSecret };
   } catch (error) {
     console.error('Error fetching credentials from database:', error);
+    
     if (error.message && error.message.includes('timed out')) {
       throw new Error('Database operation timed out: Failed to fetch API credentials');
     }
-    throw new Error('Failed to fetch API credentials: ' + error.message);
+    
+    // Re-throw the original error to preserve the message
+    throw error;
   }
 };
 

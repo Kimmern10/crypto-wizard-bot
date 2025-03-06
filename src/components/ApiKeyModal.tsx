@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -29,16 +28,13 @@ const ApiKeyModal: React.FC = () => {
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionTimeout, setConnectionTimeout] = useState<NodeJS.Timeout | null>(null);
 
-  // Reset state when modal opens or changes
   useEffect(() => {
     if (isApiKeyModalOpen) {
-      // Use values from context, but don't cause infinite rerenders
       setKeyInput(apiKey || '');
       setSecretInput(apiSecret || '');
       setLocalError(null);
     }
     
-    // Clear any existing timeout when modal opens/closes
     return () => {
       if (connectionTimeout) {
         clearTimeout(connectionTimeout);
@@ -46,7 +42,6 @@ const ApiKeyModal: React.FC = () => {
     };
   }, [isApiKeyModalOpen, apiKey, apiSecret]);
 
-  // Show any API errors in the modal
   useEffect(() => {
     if (apiError && isApiKeyModalOpen) {
       setLocalError(apiError);
@@ -65,7 +60,6 @@ const ApiKeyModal: React.FC = () => {
     try {
       setIsSubmitting(true);
       
-      // Set a timeout to detect if the operation is taking too long
       const timeout = setTimeout(() => {
         toast.warning('Connection is taking longer than expected', {
           description: 'Please be patient, or try again later.'
@@ -76,11 +70,13 @@ const ApiKeyModal: React.FC = () => {
       
       await setApiCredentials(keyInput, secretInput);
       
-      // Clear the timeout on success
       clearTimeout(timeout);
       
-      toast.success('API credentials saved successfully');
-      hideApiKeyModal();
+      toast.success('API credentials saved successfully', {
+        description: 'Please refresh your data to connect with live data'
+      });
+      
+      setTimeout(() => hideApiKeyModal(), 1500);
     } catch (error) {
       console.error('Error saving API credentials:', error);
       setLocalError(error instanceof Error ? error.message : 'Failed to save API credentials');
@@ -123,6 +119,9 @@ const ApiKeyModal: React.FC = () => {
           </DialogTitle>
           <DialogDescription>
             Enter your Kraken API key and secret to connect to your account.
+            {isAuthenticated ? 
+              " Your credentials will be securely stored in your account." :
+              " Please sign in to save your credentials securely."}
           </DialogDescription>
         </DialogHeader>
         
@@ -211,12 +210,31 @@ const ApiKeyModal: React.FC = () => {
               <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
               <AlertDescription className="text-sm text-amber-800 dark:text-amber-300">
                 {isAuthenticated ? (
-                  <p>Your API credentials will be stored securely in your account and synchronized between devices.</p>
+                  <div>
+                    <p>Your API credentials will be stored securely in your account and synchronized between devices.</p>
+                    <p className="mt-2 font-medium">Key permissions needed:</p>
+                    <ul className="list-disc ml-4 mt-1">
+                      <li>Query Funds</li>
+                      <li>Query Open Orders & Trades</li>
+                      <li>Query Closed Orders & Trades</li>
+                    </ul>
+                  </div>
                 ) : (
                   <p>You are not logged in. API credentials will only be stored locally in your browser. <a href="/auth" className="underline">Sign in</a> to save them securely.</p>
                 )}
               </AlertDescription>
             </Alert>
+            
+            <div className="text-center mt-3">
+              <a 
+                href="https://support.kraken.com/hc/en-us/articles/360000919966-How-to-generate-an-API-key-pair-"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Don't have API keys? Learn how to generate them →
+              </a>
+            </div>
           </form>
         )}
       </DialogContent>

@@ -70,11 +70,14 @@ export const useApiCredentials = ({
     try {
       setIsLoadingCredentials(true);
       
+      // Log user ID to help with debugging
+      console.log('Loading API credentials for user ID:', user?.id);
+      
       const { data, error } = await supabase
         .from('api_credentials')
         .select('api_key, api_secret')
         .eq('exchange', 'kraken')
-        .maybeSingle();
+        .single();
 
       // Clear timeout since we got a response
       clearTimeout(timeoutId);
@@ -151,15 +154,26 @@ export const useApiCredentials = ({
       
       // Check if the user is logged in for Supabase storage
       if (isAuthenticated && user) {
+        // Important: Log the user ID to verify it's correct
+        console.log('Saving credentials for authenticated user with ID:', user.id);
+        
         // Check if the user already has stored keys
-        const { data: existingData } = await supabase
+        const { data: existingData, error: checkError } = await supabase
           .from('api_credentials')
           .select('id')
+          .eq('user_id', user.id)
           .eq('exchange', 'kraken')
           .maybeSingle();
+          
+        if (checkError) {
+          console.error('Error checking for existing API keys:', checkError);
+        }
+        
+        let operationSuccess = false;
         
         if (existingData) {
           // Update existing keys
+          console.log('Updating existing API keys record with ID:', existingData.id);
           const { error } = await supabase
             .from('api_credentials')
             .update({ 
@@ -179,9 +193,11 @@ export const useApiCredentials = ({
           } else {
             console.log('API keys updated in Supabase');
             toast.success('API keys updated in database');
+            operationSuccess = true;
           }
         } else {
           // Insert new keys
+          console.log('Creating new API keys record for user ID:', user.id);
           const { error } = await supabase
             .from('api_credentials')
             .insert({
@@ -201,6 +217,23 @@ export const useApiCredentials = ({
           } else {
             console.log('API keys saved in Supabase');
             toast.success('API keys saved in database');
+            operationSuccess = true;
+          }
+        }
+        
+        // Verify the credentials were saved
+        if (operationSuccess) {
+          const { data, error } = await supabase
+            .from('api_credentials')
+            .select('id, user_id')
+            .eq('user_id', user.id)
+            .eq('exchange', 'kraken')
+            .single();
+            
+          if (error || !data) {
+            console.error('Verification failed - credentials might not be saved:', error);
+          } else {
+            console.log('Credentials verified in database for user ID:', data.user_id);
           }
         }
       } else {
