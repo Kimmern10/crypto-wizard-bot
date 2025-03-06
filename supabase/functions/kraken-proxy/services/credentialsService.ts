@@ -26,71 +26,37 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   // Create Supabase client
   const supabase = createClient(supabaseUrl, supabaseKey);
   
-  // Set a timeout promise
-  const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(new Error('Database query timed out after 10 seconds'));
-    }, 10000); // 10 seconds timeout
-  });
-  
   try {
-    console.log(`Fetching credentials for user ID: ${userId}`);
+    console.log(`Attempting to fetch credentials for user ID: ${userId}`);
     
-    // First check if the credentials exist at all
-    const { data: checkData, error: checkError } = await supabase
+    // Use a simplified, more direct query approach with no timeout race
+    const { data, error } = await supabase
       .from('api_credentials')
-      .select('id')
+      .select('api_key, api_secret')
       .eq('user_id', userId)
       .eq('exchange', 'kraken')
       .maybeSingle();
-      
-    console.log('Initial check query results:');
-    console.log('Check Data:', checkData ? 'Found' : 'Not found');
-    console.log('Check Error:', checkError ? JSON.stringify(checkError) : 'null');
     
-    if (checkError) {
-      console.error('Error checking for credentials existence:', checkError);
-      throw new Error(`Database error: ${checkError.message}`);
-    }
-    
-    if (!checkData) {
-      console.error('No API credentials found for user ID:', userId);
-      throw new Error('No API credentials found for this user');
-    }
-    
-    // Try with a direct query for the actual credentials
-    const { data: credentials, error } = await Promise.race([
-      supabase
-        .from('api_credentials')
-        .select('api_key, api_secret')
-        .eq('user_id', userId)
-        .eq('exchange', 'kraken')
-        .single(),
-      timeout
-    ]);
-    
-    // Log the credentials query result (without revealing the actual credentials)
-    console.log('Credentials query result:');
-    console.log('Data found:', credentials ? 'Yes' : 'No');
-    console.log('Error:', error ? error.message : 'null');
+    console.log('Credentials query completed');
+    console.log('Data found:', data ? 'Yes' : 'No');
     
     if (error) {
       console.error('Database error fetching credentials:', error);
-      throw new Error('Failed to fetch API credentials: ' + error.message);
+      throw new Error(`Failed to fetch API credentials: ${error.message}`);
     }
 
-    if (!credentials) {
+    if (!data) {
       console.error('No API credentials found for user ID:', userId);
       throw new Error('No API credentials found for this user');
     }
 
-    if (!credentials.api_key || !credentials.api_secret) {
+    if (!data.api_key || !data.api_secret) {
       console.error('Invalid or incomplete credentials found for user ID:', userId);
       throw new Error('Invalid API credentials found');
     }
 
-    const apiKey = credentials.api_key;
-    const apiSecret = credentials.api_secret;
+    const apiKey = data.api_key;
+    const apiSecret = data.api_secret;
     
     if (!validateCredentials(apiKey, apiSecret)) {
       console.error('Invalid API credentials format');
@@ -104,6 +70,7 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   } catch (error) {
     console.error('Error fetching credentials from database:', error);
     
+    // Provide a more specific error message
     if (error.message && error.message.includes('timed out')) {
       throw new Error('Database operation timed out: Failed to fetch API credentials');
     }
