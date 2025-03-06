@@ -51,6 +51,10 @@ export const initializeWebSocket = () => {
       });
     } else {
       console.log('Kraken proxy available! Full functionality enabled.');
+      toast.success('Kraken API proxy connected', {
+        description: 'Successfully connected to Kraken API proxy.',
+        duration: 3000
+      });
     }
     
     // Continue with WebSocket connection regardless of proxy status

@@ -1,415 +1,212 @@
 
-import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import React, { useState, useCallback } from 'react';
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { checkWebSocketStatus, checkKrakenProxyStatus, restartWebSocket } from '@/utils/websocketManager';
+import { CheckCircle, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  RefreshCw,
-  Server,
-  ExternalLink,
-  KeyRound,
-  ArrowRightLeft,
-  Info
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { useTradingContext } from '@/hooks/useTradingContext';
+import { checkWebSocketConnection, checkProxyFunction } from '@/utils/websocket/connection/connectionTester';
+import { getAuthenticationStatus } from '@/utils/kraken/krakenApiUtils';
+import { useToast } from '@/hooks/use-toast';
 
-const ApiDiagnostic: React.FC = () => {
-  const { apiKey, showApiKeyModal, isConnected, isAuthenticated, user } = useTradingContext();
-  const [isRunningCheck, setIsRunningCheck] = useState(false);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [isDiagnosing, setIsDiagnosing] = useState(false);
-  const [diagnosticResults, setDiagnosticResults] = useState<{
-    wsConnected: boolean;
-    isDemoMode: boolean;
-    proxyAvailable: boolean;
-    apiKeyConfigured: boolean;
-    edgeFunctionDeployed: boolean;
-    isUserAuthenticated: boolean;
-    userId: string | null;
-    lastChecked: number;
-    diagnosisDetails: string[];
-  }>({
-    wsConnected: false,
-    isDemoMode: false,
-    proxyAvailable: false,
-    apiKeyConfigured: false,
-    edgeFunctionDeployed: false,
-    isUserAuthenticated: false,
-    userId: null,
-    lastChecked: 0,
-    diagnosisDetails: []
-  });
-
-  // Run a detailed diagnostic that tests various parts of the system
-  const runDetailedDiagnostic = async () => {
-    setIsDiagnosing(true);
-    const details: string[] = [];
+const ApiDiagnostic = () => {
+  const { toast } = useToast();
+  const [diagnosticResults, setDiagnosticResults] = useState<any>(null);
+  const [isRunningDiagnostic, setIsRunningDiagnostic] = useState(false);
+  
+  const runDiagnostic = useCallback(async () => {
+    setIsRunningDiagnostic(true);
+    setDiagnosticResults(null);
     
     try {
-      // 1. Check authentication status
-      details.push(`Authentication check: ${isAuthenticated ? 'Authenticated' : 'Not authenticated'}`);
-      if (isAuthenticated && user) {
-        details.push(`User ID: ${user.id}`);
-      }
+      // Check authentication
+      const authStatus = await getAuthenticationStatus();
       
-      // 2. Check API credentials
-      const hasApiKey = !!apiKey;
-      details.push(`API Key configured: ${hasApiKey ? 'Yes' : 'No'}`);
+      // Check WebSocket connectivity
+      const wsConnectivity = await checkWebSocketConnection();
       
-      // 3. Check Edge Function deployment
-      let edgeFunctionResponse: any = null;
+      // Check Edge Function
+      const edgeFunctionStatus = await checkProxyFunction();
       
-      try {
-        const { data, error } = await supabase.functions.invoke('kraken-proxy', {
-          body: { health: 'check' }
-        });
-        
-        if (error) {
-          details.push(`Edge function health check failed: ${error.message}`);
-          edgeFunctionResponse = null;
-        } else {
-          details.push('Edge function responded to health check');
-          edgeFunctionResponse = data;
-        }
-      } catch (e) {
-        details.push(`Edge function call threw exception: ${e.message}`);
-        edgeFunctionResponse = null;
-      }
+      // Check for session
+      const { data: sessionData } = await supabase.auth.getSession();
+      const hasActiveSession = !!sessionData.session;
       
-      // 4. Check API credentials in database if authenticated
-      if (isAuthenticated && user) {
+      // Check for API credentials
+      let hasApiCredentials = false;
+      let apiCredentialsError = null;
+      
+      if (hasActiveSession) {
         try {
-          const { data: credData, error: credError } = await supabase
+          const { data, error } = await supabase
             .from('api_credentials')
-            .select('api_key')
-            .eq('user_id', user.id)
+            .select('id, api_key')
+            .eq('exchange', 'kraken')
             .maybeSingle();
             
-          if (credError) {
-            details.push(`Database credentials check error: ${credError.message}`);
-          } else if (credData) {
-            details.push('Database credentials check: Credentials found in database');
+          if (error) {
+            apiCredentialsError = error.message;
           } else {
-            details.push('Database credentials check: No credentials found in database');
+            hasApiCredentials = !!data;
           }
-        } catch (e) {
-          details.push(`Database credentials check exception: ${e.message}`);
+        } catch (err) {
+          apiCredentialsError = err instanceof Error ? err.message : 'Unknown error checking API credentials';
         }
       }
       
-      // Display the detailed diagnostic results
-      setDiagnosticResults(prev => ({
-        ...prev,
-        isUserAuthenticated: isAuthenticated,
-        userId: user?.id || null,
-        apiKeyConfigured: hasApiKey,
-        edgeFunctionDeployed: !!edgeFunctionResponse,
-        diagnosisDetails: details,
-        lastChecked: Date.now()
-      }));
+      // Perform a test API call
+      let apiCallSuccess = false;
+      let apiCallError = null;
       
-      // Show toast with summary
-      toast.info('Detailed diagnostic complete', {
-        description: `Found ${details.length} diagnostic entries`
-      });
-    } catch (error) {
-      toast.error('Diagnostic failed', {
-        description: error instanceof Error ? error.message : 'Unknown error'
-      });
-    } finally {
-      setIsDiagnosing(false);
-    }
-  };
-
-  const runDiagnostics = async () => {
-    setIsRunningCheck(true);
-    try {
-      console.log('Running API diagnostics...');
-      const startTime = Date.now();
-      
-      const wsStatus = checkWebSocketStatus();
-      console.log('WebSocket status:', wsStatus);
-      
-      // Check proxy status
-      const proxyCheckStart = Date.now();
-      const proxyAvailable = await checkKrakenProxyStatus();
-      console.log(`Proxy check completed in ${Date.now() - proxyCheckStart}ms`);
-      
-      // Check if edge function exists by making a call to it
-      let edgeFunctionDeployed = false;
       try {
-        const functionCheckStart = Date.now();
         const { data, error } = await supabase.functions.invoke('kraken-proxy', {
-          body: { path: 'health', method: 'GET', isPrivate: false, health: 'check' }
+          body: { 
+            path: 'public/Time', 
+            method: 'GET', 
+            isPrivate: false 
+          }
         });
         
-        console.log(`Edge function health check completed in ${Date.now() - functionCheckStart}ms`);
-        console.log('Edge function response:', data, 'Error:', error);
-        edgeFunctionDeployed = !error && !!data;
-        
         if (error) {
-          console.error('Edge function health check failed:', error);
+          apiCallError = error.message;
         } else {
-          console.log('Edge function health check response:', data);
+          apiCallSuccess = data && data.result && !!data.result.unixtime;
         }
-      } catch (e) {
-        console.error('Error checking edge function:', e);
-        edgeFunctionDeployed = false;
+      } catch (err) {
+        apiCallError = err instanceof Error ? err.message : 'Unknown error making test API call';
       }
       
+      // Set results
       setDiagnosticResults({
-        wsConnected: wsStatus.isConnected,
-        isDemoMode: wsStatus.isDemoMode,
-        proxyAvailable,
-        apiKeyConfigured: !!apiKey,
-        edgeFunctionDeployed,
-        isUserAuthenticated: isAuthenticated,
-        userId: user?.id || null,
-        lastChecked: Date.now(),
-        diagnosisDetails: []
+        authStatus: {
+          isAuthenticated: authStatus.isAuthenticated,
+          hasApiKeys: authStatus.hasApiKeys
+        },
+        connection: {
+          wsConnectivity,
+          edgeFunctionStatus,
+          hasActiveSession,
+          hasApiCredentials,
+          apiCredentialsError,
+          apiCallSuccess,
+          apiCallError
+        },
+        timestamp: new Date().toISOString()
       });
       
-      console.log(`Diagnostics completed in ${Date.now() - startTime}ms`);
-      toast.success('Diagnostic check complete');
+      toast({
+        title: "Diagnostic Complete",
+        description: "Check the results to see the status of your API connections.",
+      });
     } catch (error) {
-      console.error('Error running diagnostics:', error);
-      toast.error('Failed to complete diagnostics');
+      console.error('Error running diagnostic:', error);
+      toast({
+        title: "Diagnostic Failed",
+        description: "An error occurred while running diagnostics.",
+        variant: "destructive"
+      });
     } finally {
-      setIsRunningCheck(false);
+      setIsRunningDiagnostic(false);
     }
-  };
-
-  // Run diagnostics on first load
-  useEffect(() => {
-    runDiagnostics();
-  }, []);
-
-  // Add a way to attempt a connection if not connected
-  const attemptConnection = async () => {
-    try {
-      setIsReconnecting(true);
-      toast.info('Attempting to restart connection...');
-      console.log('Manually restarting WebSocket connection...');
-      
-      await restartWebSocket();
-      
-      // Re-run diagnostics to update status after a short delay
-      setTimeout(() => runDiagnostics(), 1500);
-    } catch (error) {
-      console.error('Failed to restart connection:', error);
-      toast.error('Connection restart failed');
-    } finally {
-      setIsReconnecting(false);
-    }
-  };
-
+  }, [toast]);
+  
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-lg flex items-center justify-between">
-          <span>API Diagnostics</span>
-          <div className="flex space-x-2">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-8 w-8 p-0" 
-              onClick={runDetailedDiagnostic}
-              disabled={isDiagnosing}
-              title="Run detailed diagnosis"
-            >
-              <Info className={`h-4 w-4 ${isDiagnosing ? 'animate-pulse' : ''}`} />
-              <span className="sr-only">Detailed Diagnosis</span>
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-8 w-8 p-0" 
-              onClick={runDiagnostics}
-              disabled={isRunningCheck}
-            >
-              <RefreshCw className={`h-4 w-4 ${isRunningCheck ? 'animate-spin' : ''}`} />
-              <span className="sr-only">Refresh</span>
-            </Button>
-          </div>
-        </CardTitle>
+    <Card className="shadow-md">
+      <CardHeader>
+        <CardTitle className="text-xl">API Diagnostic Tool</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          {/* Authentication Status */}
-          <div className="flex items-center justify-between py-1 border-b">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Authentication Status</span>
-            </div>
-            {diagnosticResults.isUserAuthenticated ? (
-              <div className="flex items-center gap-1">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-                <span className="text-xs">{diagnosticResults.userId?.substring(0, 8)}...</span>
-              </div>
-            ) : (
-              <XCircle className="h-5 w-5 text-red-500" />
-            )}
-          </div>
-          
-          {/* WebSocket Connection */}
-          <div className="flex items-center justify-between py-1 border-b">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">WebSocket Connection</span>
-            </div>
-            {diagnosticResults.wsConnected ? (
-              <CheckCircle className="h-5 w-5 text-green-500" />
-            ) : (
-              <div className="flex items-center gap-2">
-                <XCircle className="h-5 w-5 text-red-500" />
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="h-7 text-xs py-0" 
-                  onClick={attemptConnection}
-                  disabled={isReconnecting}
-                >
-                  <ArrowRightLeft className={`h-3 w-3 mr-1 ${isReconnecting ? 'animate-spin' : ''}`} />
-                  {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
-                </Button>
-              </div>
-            )}
-          </div>
-          
-          {/* Demo Mode Status */}
-          <div className="flex items-center justify-between py-1 border-b">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Demo Mode Active</span>
-              {diagnosticResults.isDemoMode && (
-                <AlertCircle className="h-4 w-4 text-amber-500" />
-              )}
-            </div>
-            {diagnosticResults.isDemoMode ? (
-              <Server className="h-5 w-5 text-amber-500" />
-            ) : (
-              <CheckCircle className="h-5 w-5 text-green-500" />
-            )}
-          </div>
-          
-          {/* Edge Function Status */}
-          <div className="flex items-center justify-between py-1 border-b">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Edge Function Deployed</span>
-            </div>
-            {diagnosticResults.edgeFunctionDeployed ? (
-              <CheckCircle className="h-5 w-5 text-green-500" />
-            ) : (
-              <XCircle className="h-5 w-5 text-red-500" />
-            )}
-          </div>
-          
-          {/* API Proxy Status */}
-          <div className="flex items-center justify-between py-1 border-b">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">API Proxy Available</span>
-            </div>
-            {diagnosticResults.proxyAvailable ? (
-              <CheckCircle className="h-5 w-5 text-green-500" />
-            ) : (
-              <XCircle className="h-5 w-5 text-red-500" />
-            )}
-          </div>
-          
-          {/* API Key Status */}
-          <div className="flex items-center justify-between py-1 border-b">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">API Key Configured</span>
-            </div>
-            {diagnosticResults.apiKeyConfigured ? (
-              <CheckCircle className="h-5 w-5 text-green-500" />
-            ) : (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="h-7 text-xs py-0" 
-                onClick={showApiKeyModal}
-              >
-                <KeyRound className="h-3 w-3 mr-1" />
-                Configure Key
-              </Button>
-            )}
-          </div>
-          
-          {/* Last Checked Timestamp */}
-          {diagnosticResults.lastChecked > 0 && (
-            <div className="text-xs text-muted-foreground text-right pt-1">
-              Last checked: {new Date(diagnosticResults.lastChecked).toLocaleTimeString()}
-            </div>
+      <CardContent>
+        <Button 
+          onClick={runDiagnostic} 
+          disabled={isRunningDiagnostic}
+          className="w-full mb-4"
+        >
+          {isRunningDiagnostic ? (
+            <>
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              Running Diagnostic...
+            </>
+          ) : (
+            <>Run System Diagnostic</>
           )}
-        </div>
+        </Button>
         
-        {/* Detailed diagnosis results */}
-        {diagnosticResults.diagnosisDetails.length > 0 && (
-          <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-900 border rounded-md">
-            <h4 className="text-sm font-medium mb-2">Detailed Diagnosis</h4>
-            <div className="max-h-32 overflow-y-auto text-xs space-y-1">
-              {diagnosticResults.diagnosisDetails.map((detail, index) => (
-                <div key={index} className="text-muted-foreground">• {detail}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        
-        {/* Recommendations based on diagnostic results */}
-        {(diagnosticResults.isDemoMode || !diagnosticResults.proxyAvailable || !diagnosticResults.edgeFunctionDeployed) && (
-          <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
-            <h4 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2">Recommendations</h4>
-            <ul className="space-y-2 text-xs text-amber-700 dark:text-amber-400">
-              {!diagnosticResults.edgeFunctionDeployed && (
-                <li className="flex gap-2">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                  <span>
-                    The Kraken proxy Edge Function needs to be deployed. Check your Supabase account.
-                  </span>
-                </li>
-              )}
-              {!diagnosticResults.apiKeyConfigured && (
-                <li className="flex gap-2">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                  <span>
-                    Configure your Kraken API key and secret to enable live trading.
-                  </span>
-                </li>
-              )}
-              {diagnosticResults.isDemoMode && (
-                <li className="flex gap-2">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                  <span>
-                    Application is in Demo Mode with simulated data. Fix the issues above and restart connection.
-                  </span>
-                </li>
-              )}
-              {!diagnosticResults.isUserAuthenticated && (
-                <li className="flex gap-2">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                  <span>
-                    You are not authenticated. Sign in to access your API credentials.
-                  </span>
-                </li>
-              )}
-            </ul>
-            <div className="mt-3">
-              <a 
-                href="https://supabase.com/dashboard" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="inline-flex items-center text-xs text-amber-800 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200"
-              >
-                Go to Supabase dashboard
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </a>
-            </div>
+        {diagnosticResults && (
+          <div className="space-y-4">
+            <Alert variant={diagnosticResults.authStatus.isAuthenticated ? "default" : "destructive"}>
+              <AlertTitle className="flex items-center">
+                {diagnosticResults.authStatus.isAuthenticated ? (
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                ) : (
+                  <XCircle className="h-4 w-4 mr-2 text-red-500" />
+                )}
+                Authentication Status
+              </AlertTitle>
+              <AlertDescription>
+                <p>User Authentication: {diagnosticResults.authStatus.isAuthenticated ? 'Authenticated ✓' : 'Not Authenticated ✗'}</p>
+                <p>API Keys Available: {diagnosticResults.authStatus.hasApiKeys ? 'Available ✓' : 'Not Available ✗'}</p>
+              </AlertDescription>
+            </Alert>
+            
+            <Alert variant={diagnosticResults.connection.wsConnectivity ? "default" : "warning"}>
+              <AlertTitle className="flex items-center">
+                {diagnosticResults.connection.wsConnectivity ? (
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 mr-2 text-amber-500" />
+                )}
+                WebSocket Connection
+              </AlertTitle>
+              <AlertDescription>
+                <p>Direct WebSocket Connection: {diagnosticResults.connection.wsConnectivity ? 'Available ✓' : 'Unavailable ✗'}</p>
+              </AlertDescription>
+            </Alert>
+            
+            <Alert variant={diagnosticResults.connection.edgeFunctionStatus ? "default" : "destructive"}>
+              <AlertTitle className="flex items-center">
+                {diagnosticResults.connection.edgeFunctionStatus ? (
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                ) : (
+                  <XCircle className="h-4 w-4 mr-2 text-red-500" />
+                )}
+                Edge Function Status
+              </AlertTitle>
+              <AlertDescription>
+                <p>API Proxy Edge Function: {diagnosticResults.connection.edgeFunctionStatus ? 'Available ✓' : 'Unavailable ✗'}</p>
+                <p>Active Session: {diagnosticResults.connection.hasActiveSession ? 'Yes ✓' : 'No ✗'}</p>
+                <p>API Credentials: {diagnosticResults.connection.hasApiCredentials ? 'Found ✓' : 'Not Found ✗'}</p>
+                {diagnosticResults.connection.apiCredentialsError && (
+                  <p className="text-red-500 text-sm mt-1">Error: {diagnosticResults.connection.apiCredentialsError}</p>
+                )}
+              </AlertDescription>
+            </Alert>
+            
+            <Alert variant={diagnosticResults.connection.apiCallSuccess ? "default" : "destructive"}>
+              <AlertTitle className="flex items-center">
+                {diagnosticResults.connection.apiCallSuccess ? (
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                ) : (
+                  <XCircle className="h-4 w-4 mr-2 text-red-500" />
+                )}
+                API Test Call
+              </AlertTitle>
+              <AlertDescription>
+                <p>Test API Call: {diagnosticResults.connection.apiCallSuccess ? 'Successful ✓' : 'Failed ✗'}</p>
+                {diagnosticResults.connection.apiCallError && (
+                  <p className="text-red-500 text-sm mt-1">Error: {diagnosticResults.connection.apiCallError}</p>
+                )}
+              </AlertDescription>
+            </Alert>
           </div>
         )}
       </CardContent>
+      <CardFooter className="text-xs text-muted-foreground">
+        {diagnosticResults ? (
+          <p>Last diagnostic run: {new Date(diagnosticResults.timestamp).toLocaleString()}</p>
+        ) : (
+          <p>Run the diagnostic to check your API connection status</p>
+        )}
+      </CardFooter>
     </Card>
   );
 };

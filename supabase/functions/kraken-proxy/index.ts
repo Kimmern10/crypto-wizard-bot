@@ -2,7 +2,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders } from "./utils/corsHeaders.ts";
 import { handleRequest } from "./handlers/requestHandler.ts";
-import { getMockResponse } from "./services/demoDataService.ts";
 
 // Main function handler for all Kraken API proxy requests
 serve(async (req) => {

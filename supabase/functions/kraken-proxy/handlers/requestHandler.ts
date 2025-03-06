@@ -14,7 +14,7 @@ const handleHealthCheck = (): Response => {
   return new Response(JSON.stringify({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    version: '1.1.0'
+    version: '1.2.0'
   }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     status: 200
