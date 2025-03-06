@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Wifi, WifiOff, Server, ExternalLink, Clock, RefreshCw, Activity, Key } from 'lucide-react';
@@ -37,7 +36,6 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   const [isCheckingProxy, setIsCheckingProxy] = useState(false);
   const [lastHeartbeat, setLastHeartbeat] = React.useState<Date>(new Date());
   
-  // Update heartbeat every 5 seconds
   React.useEffect(() => {
     const heartbeatInterval = setInterval(() => {
       if (isConnected) {
@@ -163,39 +161,38 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
               {attemptingReconnect ? 'Reconnecting...' : 'Restart connection'}
             </Button>
           </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={handleCheckProxy}
+          
+          {onConfigureApi && (
+            <Button 
+              onClick={onConfigureApi}
               className="w-full text-xs py-1 h-auto"
-              variant="secondary"
+              variant="default"
               size="sm"
-              disabled={isCheckingProxy}
             >
-              {isCheckingProxy ? 'Checking...' : 'Check API Connection'}
+              <Key className="h-3 w-3 mr-1" />
+              Configure API Keys
             </Button>
-            
-            {onConfigureApi && (
-              <Button 
-                onClick={onConfigureApi}
-                className="w-full text-xs py-1 h-auto"
-                variant="default"
-                size="sm"
-              >
-                <Key className="h-3 w-3 mr-1" />
-                API Keys
-              </Button>
-            )}
-          </div>
+          )}
+          
+          <Button
+            onClick={handleCheckProxy}
+            className="w-full text-xs py-1 h-auto"
+            variant="secondary"
+            size="sm"
+            disabled={isCheckingProxy}
+          >
+            {isCheckingProxy ? 'Checking...' : 'Check API Connection'}
+          </Button>
           
           {isDemo && (
             <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-md text-xs text-amber-800 dark:text-amber-400">
               <div className="flex items-start gap-1">
                 <Server className="h-3 w-3 mt-0.5 flex-shrink-0" />
                 <span>
-                  Currently in Demo Mode with simulated data.
+                  Currently using simulated demo data.
                   {onConfigureApi 
-                    ? ' Configure your API credentials to access real-time data.' 
-                    : ' Your API credentials may not be connected.'}
+                    ? ' Configure your Kraken API credentials to access real-time data.' 
+                    : ' Please sign in to configure API access.'}
                 </span>
               </div>
             </div>

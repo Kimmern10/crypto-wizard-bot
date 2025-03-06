@@ -1,4 +1,3 @@
-
 import React from 'react';
 import AccountOverview from './AccountOverview';
 import ConnectionStatus from './ConnectionStatus';
@@ -7,7 +6,7 @@ import CurrencyPriceChart from './CurrencyPriceChart';
 import UserPositions from './UserPositions';
 import NewsAndEvents from './NewsAndEvents';
 import { Button } from "@/components/ui/button";
-import { LogIn, Key, AlertCircle } from 'lucide-react';
+import { LogIn, Key, AlertCircle, ExternalLink } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from "../ui/alert";
 
 interface DashboardLayoutProps {
@@ -61,7 +60,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 Using Demo Mode with Simulated Data
               </h3>
               <p className="text-amber-700 dark:text-amber-400 text-sm mt-1">
-                You're currently viewing simulated market data. Sign in to access real-time data and trading capabilities.
+                Sign in to connect your Kraken API and access real-time trading data.
               </p>
             </div>
             <div className="flex space-x-2">
@@ -84,14 +83,17 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       {isAuthenticated && isDemo && (
         <Alert variant="warning" className="mb-6">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>API Credentials Required</AlertTitle>
+          <AlertTitle>Configure Kraken API Access</AlertTitle>
           <AlertDescription className="flex flex-col gap-2">
             <p>
-              You're signed in but using Demo Mode because your Kraken API credentials are missing. 
-              Configure your API keys to access real-time data and trading capabilities.
+              To access real-time trading data, you'll need to:
             </p>
-            {onConfigureApi && (
-              <div className="mt-2">
+            <ol className="list-decimal ml-4 space-y-1">
+              <li>Create API keys in your Kraken account</li>
+              <li>Configure them here to enable live trading</li>
+            </ol>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {onConfigureApi && (
                 <Button 
                   onClick={onConfigureApi}
                   variant="default"
@@ -101,8 +103,23 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   <Key className="mr-1 h-4 w-4" />
                   Configure API Keys
                 </Button>
-              </div>
-            )}
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center"
+                asChild
+              >
+                <a 
+                  href="https://support.kraken.com/hc/en-us/articles/360000919966-How-to-generate-an-API-key-pair-"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="mr-1 h-4 w-4" />
+                  How to Get Kraken API Keys
+                </a>
+              </Button>
+            </div>
           </AlertDescription>
         </Alert>
       )}
