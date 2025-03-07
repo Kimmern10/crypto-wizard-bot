@@ -29,7 +29,7 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   try {
     console.log(`Attempting to fetch credentials for user ID: ${userId}`);
     
-    // Use a simplified, more direct query approach with no timeout race
+    // Use a simplified, more direct query approach
     const { data, error } = await supabase
       .from('api_credentials')
       .select('api_key, api_secret')

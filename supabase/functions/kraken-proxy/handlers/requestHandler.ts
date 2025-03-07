@@ -104,37 +104,28 @@ export const handleRequest = async (req: Request): Promise<Response> => {
     // Initialize apiKey and apiSecret
     let apiKey = '';
     let apiSecret = '';
+    let useDemoMode = forceDemoMode || false;
+    let credentialsError = null;
 
     // For private endpoints, fetch API credentials from Supabase
     if (isPrivate && !forceDemoMode) {
       if (!userId) {
         console.error('No user ID provided for private endpoint');
-        return new Response(
-          JSON.stringify({ error: ['User ID is required for private endpoints'] }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-        );
-      }
-
-      try {
-        const credentials = await fetchCredentials(userId);
-        apiKey = credentials.apiKey;
-        apiSecret = credentials.apiSecret;
-        
-        console.log('Successfully retrieved API credentials for user');
-      } catch (error) {
-        console.error('Error fetching credentials:', error);
-        
-        // If demo mode was requested, continue without credentials
-        if (forceDemoMode) {
-          console.log('Proceeding with demo mode as requested');
-        } else {
-          return new Response(
-            JSON.stringify({ error: [error.message], demoModeAvailable: true }),
-            { 
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-              status: error.message.includes('No API credentials') ? 404 : 500 
-            }
-          );
+        useDemoMode = true;
+        credentialsError = 'User ID is required for private endpoints';
+      } else {
+        try {
+          const credentials = await fetchCredentials(userId);
+          apiKey = credentials.apiKey;
+          apiSecret = credentials.apiSecret;
+          
+          console.log('Successfully retrieved API credentials for user');
+        } catch (error) {
+          console.error('Error fetching credentials:', error);
+          
+          // Store the error but continue with demo mode
+          useDemoMode = true;
+          credentialsError = error.message;
         }
       }
     }
@@ -153,16 +144,17 @@ export const handleRequest = async (req: Request): Promise<Response> => {
 
     let bodyData = data || {};
     
-    // If demo mode is requested, add that flag
-    if (forceDemoMode) {
+    // If demo mode is needed, add that flag
+    if (useDemoMode) {
+      console.log('Using demo mode for this request');
       bodyData = {
         ...bodyData,
-        forceDemoMode: 'true'
+        _demoMode: 'true'
       };
     }
     
     // Add authentication for private endpoints
-    if (isPrivate && !forceDemoMode) {
+    if (isPrivate && !useDemoMode) {
       // Create nonce for authentication with microsecond precision
       const nonce = (Date.now() * 1000 + Math.floor(Math.random() * 1000)).toString();
       
@@ -200,10 +192,15 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         };
       } catch (error) {
         console.error('Error creating API signature:', error);
-        return new Response(
-          JSON.stringify({ error: ['Failed to create API signature: ' + error.message] }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-        );
+        // Fall back to demo mode instead of returning an error
+        useDemoMode = true;
+        credentialsError = 'Failed to create API signature: ' + error.message;
+        
+        // Update body data for demo mode
+        bodyData = {
+          ...data || {},
+          _demoMode: 'true'
+        };
       }
     }
     
@@ -225,7 +222,8 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         ...corsHeaders, 
         'Content-Type': 'application/json',
         'X-RateLimit-Remaining-IP': ipRateLimit.remaining.toString(),
-        'X-RateLimit-Reset-IP': ipRateLimit.resetIn.toString()
+        'X-RateLimit-Reset-IP': ipRateLimit.resetIn.toString(),
+        'X-Demo-Mode': useDemoMode ? 'true' : 'false'
       };
       
       // If userId is available, add user rate limit information
@@ -233,6 +231,20 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         const userRateLimit = checkRateLimit(userId, 'user');
         responseHeaders['X-RateLimit-Remaining-User'] = userRateLimit.remaining.toString();
         responseHeaders['X-RateLimit-Reset-User'] = userRateLimit.resetIn.toString();
+      }
+      
+      // If using demo mode due to an error, add that to the response
+      if (useDemoMode && credentialsError) {
+        responseData._isDemo = true;
+        responseData._demoReason = credentialsError;
+        
+        // Include the error for client-side display but don't make it look like an API error
+        if (!responseData.info) {
+          responseData.info = [];
+        }
+        if (Array.isArray(responseData.info)) {
+          responseData.info.push(`Using demo mode: ${credentialsError}`);
+        }
       }
       
       // Check if Kraken API returned an error
@@ -243,18 +255,26 @@ export const handleRequest = async (req: Request): Promise<Response> => {
         const errorMsg = responseData.error.join(', ');
         const statusCode = mapErrorToStatusCode(errorMsg);
         
+        // Add demo mode flag to let client know data might be simulated
+        responseData._isDemo = useDemoMode;
+        
         return new Response(JSON.stringify(responseData), {
           headers: responseHeaders,
           status: statusCode
         });
       }
 
+      // Add demo mode flag to response
+      responseData._isDemo = useDemoMode;
+      
       // Return data with CORS headers
       return new Response(JSON.stringify(responseData), {
         headers: responseHeaders,
         status
       });
     } catch (error) {
+      console.error('Error calling Kraken API:', error);
+      
       // Determine appropriate status code based on error message
       let statusCode = 502; // Default to bad gateway
       
@@ -265,7 +285,10 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       return new Response(
         JSON.stringify({ 
           error: [error.message],
-          timestamp: new Date().toISOString() 
+          timestamp: new Date().toISOString(),
+          _isDemo: useDemoMode,
+          _demoReason: credentialsError,
+          demoModeAvailable: true
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: statusCode }
       );
@@ -278,7 +301,9 @@ export const handleRequest = async (req: Request): Promise<Response> => {
       JSON.stringify({ 
         error: [error.message || 'Unknown error in Kraken proxy'],
         timestamp: new Date().toISOString(),
-        request_id: crypto.randomUUID()
+        request_id: crypto.randomUUID(),
+        demoModeAvailable: true,
+        _isDemo: true
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     );
