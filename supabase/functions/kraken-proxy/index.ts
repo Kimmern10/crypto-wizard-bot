@@ -20,7 +20,7 @@ serve(async (req) => {
           status: 'ok', 
           time: new Date().toISOString(),
           message: 'Kraken proxy is operational',
-          version: '1.4.0' // Updated version for tracking
+          version: '1.5.0'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -45,6 +45,8 @@ serve(async (req) => {
         statusCode = 404; // Not Found
       } else if (errorMessage.includes('bad request')) {
         statusCode = 400; // Bad Request
+      } else if (errorMessage.includes('unauthorized') || errorMessage.includes('authentication')) {
+        statusCode = 401; // Unauthorized
       }
     }
     
@@ -52,9 +54,7 @@ serve(async (req) => {
       JSON.stringify({ 
         error: [errorMessage], 
         result: null,
-        _isDemo: true,
-        timestamp: new Date().toISOString(),
-        demoModeAvailable: true
+        timestamp: new Date().toISOString()
       }),
       { 
         status: statusCode, 

@@ -29,7 +29,7 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
   try {
     console.log(`Attempting to fetch credentials for user ID: ${userId}`);
     
-    // Use a simplified, more direct query approach
+    // Query for the user's API credentials
     const { data, error } = await supabase
       .from('api_credentials')
       .select('api_key, api_secret')
@@ -38,7 +38,6 @@ export const fetchCredentials = async (userId: string): Promise<CredentialsRespo
       .maybeSingle();
     
     console.log('Credentials query completed');
-    console.log('Data found:', data ? 'Yes' : 'No');
     
     if (error) {
       console.error('Database error fetching credentials:', error);
